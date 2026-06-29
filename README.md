@@ -22,6 +22,13 @@ python3 -m http.server 8080
 
 Then open [http://localhost:8080](http://localhost:8080).
 
+If `localhost:8080` does not load, make sure you started the server from this exact folder:
+
+```sh
+cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
+python3 -m http.server 8080 --bind 127.0.0.1
+```
+
 ## Important integration boundary
 
 This app is a browser prototype of the workflow, not a true native SolidWorks embed.
@@ -41,3 +48,15 @@ For production, the recommended architecture is:
 ## Suggested GitHub repository name
 
 `solidworks-ai-cad-studio`
+
+## GitHub Pages
+
+This repo includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`.
+
+After the repository is pushed to GitHub:
+
+1. Re-authenticate GitHub CLI on this machine.
+2. Create the remote repository.
+3. Push `main`.
+4. In GitHub, open **Settings → Pages** and set the source to **GitHub Actions** if it is not already selected.
+5. The workflow will publish the site automatically on each push to `main`.
