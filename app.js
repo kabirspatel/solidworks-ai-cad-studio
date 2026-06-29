@@ -3,6 +3,8 @@ const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_BRIDGE_URL = "http://127.0.0.1:8787";
 const DEFAULT_AI_ENDPOINT = "http://127.0.0.1:8787/api/copilot";
+const DEFAULT_CLOUD_SPACE_URL = "https://my.3dexperience.3ds.com/";
+const DEFAULT_XDESIGN_INFO_URL = "https://www.solidworks.com/product/solidworks-xdesign";
 const DEFAULT_PROMPT = "Design a portable diagnostic enclosure for a point-of-care diagnostic device.";
 const DEFAULT_REQUIREMENTS = `Project: Portable diagnostic enclosure
 Overall length 170 mm
@@ -161,6 +163,16 @@ function createDefaultState() {
       lastSync: "",
       lastMessage: "No SolidWorks bridge connected"
     },
+    cloud: {
+      provider: "3DEXPERIENCE / SOLIDWORKS xDesign",
+      status: "Not connected",
+      brokerUrl: "",
+      spaceUrl: DEFAULT_CLOUD_SPACE_URL,
+      launchUrl: DEFAULT_CLOUD_SPACE_URL,
+      infoUrl: DEFAULT_XDESIGN_INFO_URL,
+      lastSync: "",
+      lastMessage: "Use cloud mode when you want browser-based CAD without local SolidWorks."
+    },
     concept: blueprint.concept,
     requirements: blueprint.requirements,
     parameters: blueprint.parameters,
@@ -192,13 +204,17 @@ function normalizeState(saved) {
   const defaults = createDefaultState();
   const savedAi = { ...(saved.ai || {}) };
   const savedBridge = { ...(saved.bridge || {}) };
+  const savedCloud = { ...(saved.cloud || {}) };
   if (!savedAi.endpoint) savedAi.endpoint = defaults.ai.endpoint;
   if (savedBridge.url === "https://localhost:8787") savedBridge.url = DEFAULT_BRIDGE_URL;
+  if (!savedCloud.spaceUrl) savedCloud.spaceUrl = defaults.cloud.spaceUrl;
+  if (!savedCloud.launchUrl) savedCloud.launchUrl = savedCloud.spaceUrl;
   return {
     ...defaults,
     ...saved,
     ai: { ...defaults.ai, ...savedAi },
     bridge: { ...defaults.bridge, ...savedBridge },
+    cloud: { ...defaults.cloud, ...savedCloud },
     concept: { ...defaults.concept, ...(saved.concept || {}) },
     uploadedFiles: Array.isArray(saved.uploadedFiles) ? saved.uploadedFiles : [],
     requirements: Array.isArray(saved.requirements) && saved.requirements.length ? saved.requirements : defaults.requirements,
@@ -869,6 +885,8 @@ function syncDraftFromDom() {
   const aiEndpoint = document.getElementById("aiEndpoint");
   const aiKey = document.getElementById("aiKey");
   const bridgeUrl = document.getElementById("bridgeUrl");
+  const cloudBrokerUrl = document.getElementById("cloudBrokerUrl");
+  const cloudSpaceUrl = document.getElementById("cloudSpaceUrl");
 
   if (prompt) state.prompt = prompt.value.trim();
   if (requirements) state.requirementText = requirements.value.trim();
@@ -878,6 +896,11 @@ function syncDraftFromDom() {
   if (aiEndpoint) state.ai.endpoint = aiEndpoint.value.trim();
   if (aiKey && aiKey.value.trim()) sessionStorage.setItem(SESSION_AI_KEY, aiKey.value.trim());
   if (bridgeUrl) state.bridge.url = bridgeUrl.value.trim();
+  if (cloudBrokerUrl) state.cloud.brokerUrl = cloudBrokerUrl.value.trim();
+  if (cloudSpaceUrl) {
+    state.cloud.spaceUrl = cloudSpaceUrl.value.trim() || DEFAULT_CLOUD_SPACE_URL;
+    state.cloud.launchUrl = state.cloud.launchUrl || state.cloud.spaceUrl;
+  }
 }
 
 function statusClass(value) {
@@ -904,6 +927,7 @@ function makeCurrentModelPayload() {
     designTable: state.designTable,
     analysis: state.analysis,
     agents: state.agents,
+    cloud: state.cloud,
     solidworksIntent: state.solidworksIntent,
     targetDocument: state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`
   };
@@ -1225,6 +1249,125 @@ async function postBridge(endpoint, actionLabel) {
   return data;
 }
 
+function cloudPackage() {
+  const payload = makeCurrentModelPayload();
+  return {
+    source: "SolidWorks AI CAD Studio",
+    createdAt: new Date().toISOString(),
+    provider: state.cloud.provider,
+    target: {
+      platform: "3DEXPERIENCE",
+      app: "SOLIDWORKS xDesign or 3DEXPERIENCE SOLIDWORKS",
+      workspaceUrl: state.cloud.spaceUrl
+    },
+    payload,
+    designTableCsv: designTableCsv(),
+    operations: {
+      documentType: payload.solidworksIntent?.documentType || "part",
+      featureOperations: payload.solidworksIntent?.operations || [],
+      dimensionOperations: payload.parameters.map(parameter => ({
+        type: "set_dimension",
+        parameter: parameter.key,
+        swDimension: parameter.swDimension,
+        value: parameter.value,
+        unit: parameter.unit
+      })),
+      imageGeometryOperations: (payload.imageGeometry?.images || []).map(image => ({
+        type: "guide_curve_profile",
+        name: image.name,
+        confidence: image.confidence,
+        points: image.profile || []
+      })),
+      transitionMatrix: payload.imageGeometry?.transitionMatrix || []
+    }
+  };
+}
+
+function openCloudWorkspace() {
+  syncDraftFromDom();
+  const target = state.cloud.launchUrl || state.cloud.spaceUrl || DEFAULT_CLOUD_SPACE_URL;
+  window.open(target, "_blank", "noopener,noreferrer");
+  state.cloud.status = "Opened";
+  state.cloud.lastMessage = "Opened cloud workspace in a new tab. If your plan includes xDesign, launch it there.";
+  persist("Cloud workspace opened");
+}
+
+function exportCloudPackage() {
+  syncDraftFromDom();
+  const title = sanitizeFilename(state.concept.title);
+  downloadText(`${title}-3dexperience-cloud-package.json`, JSON.stringify(cloudPackage(), null, 2), "application/json");
+  state.cloud.status = "Package exported";
+  state.cloud.lastSync = new Date().toISOString();
+  state.cloud.lastMessage = "Cloud package exported for a 3DEXPERIENCE/xDesign broker or manual import workflow.";
+  persist("Cloud package exported");
+}
+
+async function connectCloud() {
+  syncDraftFromDom();
+  if (!state.cloud.brokerUrl) {
+    state.cloud.status = "Manual login";
+    state.cloud.lastMessage = "No cloud broker configured. Open 3DEXPERIENCE and sign in with your SOLIDWORKS account.";
+    persist("Open cloud workspace to sign in");
+    openCloudWorkspace();
+    return;
+  }
+
+  loadingAction = "connect-cloud";
+  render();
+
+  try {
+    const baseUrl = normalizeBaseUrl(state.cloud.brokerUrl);
+    const response = await fetch(`${baseUrl}/api/cloud/status`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || data.error || `Cloud broker returned ${response.status}`);
+    state.cloud.status = data.connected ? "Connected" : "Broker online";
+    state.cloud.launchUrl = data.launchUrl || data.spaceUrl || state.cloud.spaceUrl;
+    state.cloud.lastMessage = data.message || "Cloud broker is ready.";
+    persist("Cloud broker connected");
+  } catch (error) {
+    state.cloud.status = "Cloud error";
+    state.cloud.lastMessage = error.message;
+    persist(error.message);
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function pushToCloud() {
+  syncDraftFromDom();
+  if (!state.cloud.brokerUrl) {
+    exportCloudPackage();
+    return;
+  }
+
+  loadingAction = "push-cloud";
+  render();
+
+  try {
+    const baseUrl = normalizeBaseUrl(state.cloud.brokerUrl);
+    const response = await fetch(`${baseUrl}/api/cloud/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cloudPackage())
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || data.error || `Cloud push failed (${response.status})`);
+    state.cloud.status = "Synced";
+    state.cloud.lastSync = new Date().toISOString();
+    state.cloud.launchUrl = data.launchUrl || state.cloud.launchUrl;
+    state.cloud.lastMessage = data.message || "Cloud package sent to broker.";
+    persist("Cloud package sent");
+  } catch (error) {
+    state.cloud.status = "Cloud sync failed";
+    state.cloud.lastMessage = error.message;
+    persist(error.message);
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
 async function runSimulation() {
   loadingAction = "simulate";
   render();
@@ -1531,6 +1674,29 @@ function renderModel() {
         <button class="button secondary" data-action="material" ${loadingAction === "material" ? "disabled" : ""}>Material/LCA</button>
         <button class="button secondary" data-action="run-agents" ${loadingAction === "agents" ? "disabled" : ""}>Run agents</button>
       </div>
+      <div class="cloud-panel">
+        <div>
+          <label>Online cloud mode</label>
+          <strong>${escapeHtml(state.cloud.provider)}</strong>
+          <p>${escapeHtml(state.cloud.lastMessage)}</p>
+        </div>
+        <div class="field-row">
+          <div>
+            <label for="cloudSpaceUrl">3DEXPERIENCE workspace URL</label>
+            <input id="cloudSpaceUrl" value="${escapeHtml(state.cloud.spaceUrl)}" placeholder="https://my.3dexperience.3ds.com/">
+          </div>
+          <div>
+            <label for="cloudBrokerUrl">Cloud broker URL</label>
+            <input id="cloudBrokerUrl" value="${escapeHtml(state.cloud.brokerUrl)}" placeholder="https://your-cloud-broker.example.com">
+          </div>
+        </div>
+        <div class="button-row">
+          <button class="button primary" data-action="open-cloud">Open / log in</button>
+          <button class="button secondary" data-action="connect-cloud" ${loadingAction === "connect-cloud" ? "disabled" : ""}>Connect cloud</button>
+          <button class="button secondary" data-action="push-cloud" ${loadingAction === "push-cloud" ? "disabled" : ""}>Push package</button>
+          <button class="button ghost" data-action="export-cloud-package">Export cloud package</button>
+        </div>
+      </div>
       <div class="model-frame">
         <div class="model-bar">
           <span>${escapeHtml(state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
@@ -1549,6 +1715,8 @@ function renderModel() {
         <div class="bridge-card"><span>FEA</span><strong>${escapeHtml(state.analysis.simulation ? `${state.analysis.simulation.status} SF ${state.analysis.simulation.safetyFactor || "-"}` : "Not run")}</strong></div>
         <div class="bridge-card"><span>Optimization</span><strong>${escapeHtml(state.analysis.optimization ? state.analysis.optimization.status : "Not run")}</strong></div>
         <div class="bridge-card"><span>Material/LCA</span><strong>${escapeHtml(`${state.analysis.material.feasibility}/100 - LCA ${state.analysis.material.lca}/100`)}</strong></div>
+        <div class="bridge-card"><span>Cloud</span><strong>${escapeHtml(state.cloud.status)}</strong></div>
+        <div class="bridge-card"><span>Cloud sync</span><strong>${escapeHtml(formatDate(state.cloud.lastSync))}</strong></div>
       </div>
     </div>
   `;
@@ -1699,6 +1867,10 @@ document.addEventListener("click", event => {
   if (action === "optimize") optimizeModel();
   if (action === "material") assessMaterial();
   if (action === "run-agents") runAgents();
+  if (action === "open-cloud") openCloudWorkspace();
+  if (action === "connect-cloud") connectCloud();
+  if (action === "push-cloud") pushToCloud();
+  if (action === "export-cloud-package") exportCloudPackage();
   if (action === "export-design-table") exportDesignTable();
   if (action === "export-snapshot") exportSnapshot();
   if (action === "reset-demo") resetDemo();
@@ -1708,7 +1880,7 @@ document.addEventListener("change", event => {
   if (event.target.id === "requirementFiles") handleRequirementUpload(event.target.files);
   if (event.target.id === "imageFiles") handleImageUpload(event.target.files);
   if (event.target.id === "tableFiles") handleTableUpload(event.target.files);
-  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl"].includes(event.target.id)) {
+  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl"].includes(event.target.id)) {
     syncDraftFromDom();
     persist();
   }

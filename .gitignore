@@ -3,5 +3,6 @@ bridge/SolidWorksBridge/bin/
 bridge/SolidWorksBridge/obj/
 bridge/SolidWorksBridge/runs/
 bridge/MacDevBridge/runs/
+bridge/CloudBroker/runs/
 bridge/SolidWorksNativeHost/bin/
 bridge/SolidWorksNativeHost/obj/

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "mac:dev": "node bridge/MacDevBridge/server.mjs",
-    "check:js": "node --check app.js && node --check bridge/MacDevBridge/server.mjs"
+    "cloud:broker": "node bridge/CloudBroker/server.mjs",
+    "check:js": "node --check app.js && node --check bridge/MacDevBridge/server.mjs && node --check bridge/CloudBroker/server.mjs"
   },
   "engines": {
     "node": ">=20"

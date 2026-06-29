@@ -33,6 +33,12 @@ Or, without npm:
 node bridge/MacDevBridge/server.mjs
 ```
 
+If your terminal says `zsh: command not found: npm`, install Node.js or use the absolute Node runtime bundled with this Codex environment:
+
+```sh
+/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node bridge/MacDevBridge/server.mjs
+```
+
 Then open [http://127.0.0.1:8787/](http://127.0.0.1:8787/).
 
 The Mac bridge serves the dashboard and implements the same backend contract as the Windows bridge:
@@ -56,6 +62,47 @@ npm run mac:dev
 ```
 
 Without `OPENAI_API_KEY`, the bridge uses deterministic local responses so the workflow still runs offline.
+
+## Online cloud mode
+
+For a no-local-SolidWorks workflow, use SOLIDWORKS/3DEXPERIENCE cloud services or browser CAD such as xDesign. The dashboard now includes an `Online cloud mode` section in the Model panel:
+
+- `Open / log in`: opens the user's 3DEXPERIENCE workspace in a new tab.
+- `Cloud broker URL`: points to a backend that performs OAuth and platform API calls.
+- `Push package`: sends the current model package to the broker, or exports a package if no broker is configured.
+- `Export cloud package`: downloads the current requirements, parameters, design-table CSV, operations, and image-geometry data for a cloud integration.
+
+Cloud broker scaffold:
+
+```sh
+node bridge/CloudBroker/server.mjs
+```
+
+Or with npm:
+
+```sh
+npm run cloud:broker
+```
+
+The broker exposes:
+
+- `GET /api/cloud/status`
+- `GET /api/cloud/auth/start`
+- `GET /api/cloud/auth/callback`
+- `POST /api/cloud/push`
+
+To make this truly account-connected, register a Dassault/3DEXPERIENCE OAuth application and configure:
+
+```sh
+export THREEDS_AUTH_URL="https://..."
+export THREEDS_TOKEN_URL="https://..."
+export THREEDS_CLIENT_ID="..."
+export THREEDS_CLIENT_SECRET="..."
+export THREEDS_REDIRECT_URI="https://your-broker.example.com/api/cloud/auth/callback"
+export THREEDS_SPACE_URL="https://my.3dexperience.3ds.com/"
+```
+
+Important limitation: desktop SOLIDWORKS itself is not a browser app. A pure online/no-local workflow needs the user's licensed 3DEXPERIENCE/SOLIDWORKS cloud apps, such as xDesign, plus approved platform APIs. The dashboard can open the workspace and prepare/push model packages, but real in-browser CAD editing depends on the user's cloud entitlement and Dassault API access.
 
 ## AI integration
 
@@ -129,6 +176,12 @@ Mac bridge scaffold:
 
 ```sh
 bridge/MacDevBridge
+```
+
+Cloud broker scaffold:
+
+```sh
+bridge/CloudBroker
 ```
 
 Native embedded-window host scaffold:

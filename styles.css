@@ -400,6 +400,30 @@ textarea {
   align-items: end;
 }
 
+.cloud-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(44, 107, 79, .08), rgba(36, 56, 61, .03)),
+    var(--surface-alt);
+}
+
+.cloud-panel strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.cloud-panel p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .model-frame {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -607,6 +631,7 @@ td code {
   .topbar,
   .specs-body,
   .model-tools,
+  .cloud-panel .field-row,
   .bridge-strip,
   .intake-grid,
   .agent-grid,
