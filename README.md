@@ -1,60 +1,112 @@
 # SolidWorks AI CAD Studio
 
-A standalone dashboard prototype for turning uploaded requirements into a parameterized CAD concept, reviewing the resulting SolidWorks workspace plan, and triggering simulations, drawings, and renderings from one UI.
+A focused dashboard for four jobs:
 
-## What this prototype includes
+- AI copilot
+- requirements intake
+- SolidWorks model window
+- current model specs
 
-- AI copilot prompt and requirement brief intake
-- Text-based requirement file uploads (`.txt`, `.md`, `.json`, `.csv`)
-- Automatic concept-family detection (`enclosure`, `bottle`, `bracket`, `tray`, `assembly`)
-- Editable parameter table with revision tracking
-- Embedded SolidWorks-style workspace mockup with feature tree and model preview
-- Simulation, drawing-pack, and rendering artifact generation
-- Local persistence in browser `localStorage`
+The GitHub Pages app is static, so it cannot contain private server secrets or directly host a native SolidWorks desktop process. It now exposes real connector points for both.
 
 ## Open locally
-
-From this folder:
-
-```sh
-python3 -m http.server 8080
-```
-
-Then open [http://localhost:8080](http://localhost:8080).
-
-If `localhost:8080` does not load, make sure you started the server from this exact folder:
 
 ```sh
 cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 python3 -m http.server 8080 --bind 127.0.0.1
 ```
 
-## Important integration boundary
+Then open [http://localhost:8080](http://localhost:8080).
 
-This app is a browser prototype of the workflow, not a true native SolidWorks embed.
+## AI integration
 
-For production, the recommended architecture is:
+The copilot supports three modes:
 
-1. Keep this dashboard as the orchestration and review surface.
-2. Host the real SolidWorks window in a Windows desktop shell such as WPF + WebView2, Electron, or Tauri.
-3. Add a local bridge service that can:
-   - parse uploaded requirements
-   - build or update SolidWorks parameters and feature edits
-   - run simulation studies
-   - generate drawings
-   - generate renderings
-4. Return run status and generated artifacts back to the dashboard.
+- `OpenAI key`: calls the OpenAI Responses API from the browser with a key entered for the current tab session.
+- `AI endpoint`: posts the current model payload to your own backend endpoint.
+- `Local parser`: deterministic fallback for offline demos.
 
-## Suggested GitHub repository name
+For production, prefer the `AI endpoint` mode so API keys stay server-side.
 
-`solidworks-ai-cad-studio`
+Expected AI endpoint request:
+
+```json
+{
+  "instructions": "JSON-only CAD copilot instructions",
+  "model": "gpt-5-mini",
+  "payload": {
+    "revision": 1,
+    "prompt": "Design prompt",
+    "requirementsText": "Raw requirements",
+    "concept": {},
+    "parameters": [],
+    "solidworksIntent": {}
+  }
+}
+```
+
+Expected AI response:
+
+```json
+{
+  "reply": "Short summary",
+  "title": "Model title",
+  "family": "enclosure",
+  "material": "PC-ABS",
+  "requirements": ["Overall length 170 mm"],
+  "parameters": [
+    { "key": "length", "label": "Length", "unit": "mm", "value": 170, "source": "AI" }
+  ],
+  "features": ["Base shell"],
+  "solidworksIntent": {
+    "documentType": "part",
+    "rebuildMode": "parametric",
+    "operations": [
+      { "order": 1, "name": "Base shell", "action": "create_or_update" }
+    ]
+  }
+}
+```
+
+## SolidWorks bridge
+
+A public browser page cannot embed the native SolidWorks desktop window by itself. The dashboard expects a Windows-side bridge that owns SolidWorks and returns a browser-embeddable viewer URL.
+
+Required bridge endpoints:
+
+```http
+GET /health
+```
+
+Expected response:
+
+```json
+{
+  "solidworksRunning": true,
+  "activeDocument": "portable-diagnostic-enclosure.SLDPRT",
+  "embedUrl": "https://localhost:8787/viewer",
+  "message": "SolidWorks bridge connected"
+}
+```
+
+```http
+POST /api/model
+```
+
+Request body is the dashboard model payload. Expected response:
+
+```json
+{
+  "activeDocument": "portable-diagnostic-enclosure.SLDPRT",
+  "embedUrl": "https://localhost:8787/viewer",
+  "message": "Model rebuilt in SolidWorks"
+}
+```
+
+The bridge should enable CORS for the GitHub Pages origin and serve `/viewer` as the live SolidWorks viewport, usually through a Windows desktop shell, WebView2 host, remote stream, or local viewer service.
 
 ## GitHub Pages
 
 This repo includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`.
 
-After the repository is pushed to GitHub:
-
-1. Open **Settings -> Pages**.
-2. Confirm the source is **GitHub Actions**.
-3. The workflow publishes the static site automatically on each push to `main`.
+The workflow publishes `index.html`, `styles.css`, `app.js`, and `.nojekyll` automatically on each push to `main`.

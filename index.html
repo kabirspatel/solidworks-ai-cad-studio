@@ -3,97 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f4efe6">
+  <meta name="theme-color" content="#eef2f0">
   <title>SolidWorks AI CAD Studio</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand-block">
-        <span class="brand-kicker">New Project</span>
-        <h2>SolidWorks AI CAD Studio</h2>
-        <p>A standalone dashboard prototype for requirements-driven CAD generation, parameter editing, deployment, simulation, drawings, and renderings.</p>
+    <header class="topbar">
+      <div class="brand">
+        <span>SolidWorks AI Studio</span>
+        <strong id="projectTitle">Parametric concept</strong>
       </div>
+      <div class="status-row" aria-label="Connection status">
+        <span id="aiStatus" class="status-pill">AI offline</span>
+        <span id="bridgeStatus" class="status-pill">SolidWorks disconnected</span>
+      </div>
+    </header>
 
-      <nav class="section-nav" aria-label="Section navigation">
-        <a href="#overview">Overview</a>
-        <a href="#workspace">Workspace</a>
-        <a href="#parameters">Parameters</a>
-        <a href="#outputs">Outputs</a>
-        <a href="#timeline">Timeline</a>
-      </nav>
-
-      <article class="sidebar-card">
-        <span class="eyebrow">Active design</span>
-        <strong id="projectTitle">Portable diagnostic enclosure</strong>
-        <p id="projectSubtitle">AI-generated concept ready for SolidWorks deployment.</p>
-        <div class="sidebar-metrics">
-          <div><span>Revision</span><b id="revisionLabel">R03</b></div>
-          <div><span>Bridge</span><b id="connectionLabel">Prototype ready</b></div>
-        </div>
-      </article>
-
-      <article class="sidebar-card boundary-card">
-        <span class="eyebrow">Native embed boundary</span>
-        <strong>Use this app to prototype the workflow. Host the real SolidWorks window in a Windows desktop shell.</strong>
-        <p>Production should pair a desktop container such as WPF + WebView2, Electron, or Tauri with a local SolidWorks API bridge for COM automation, simulations, drawings, and rendering calls.</p>
-      </article>
-    </aside>
-
-    <div class="page-column">
-      <header class="topbar">
-        <div>
-          <span class="eyebrow">Standalone concept app</span>
-          <h1>Requirements to SolidWorks, without leaving the dashboard.</h1>
-        </div>
-        <div class="topbar-actions">
-          <button class="button secondary" data-action="load-demo">Load demo brief</button>
-          <button class="button secondary" data-action="export-snapshot">Export snapshot</button>
-          <button class="button primary" data-action="deploy-model">Deploy to bridge</button>
-        </div>
-      </header>
-
-      <main class="main-content">
-        <section class="hero panel" id="overview">
-          <div class="hero-copy">
-            <span class="eyebrow">Workflow promise</span>
-            <h2>Upload a brief, let the AI structure the geometry, and hand the result to SolidWorks.</h2>
-            <p>The prototype below handles concept ideation, requirement extraction, parameter mapping, native-window deployment planning, simulation studies, drawing packs, and rendering outputs through one connected UI.</p>
-            <div class="hero-actions">
-              <button class="button primary" data-action="generate-model">Generate model</button>
-              <button class="button secondary" data-action="run-simulations">Run simulations</button>
-            </div>
-          </div>
-          <aside class="hero-aside">
-            <span class="eyebrow">Pipeline</span>
-            <strong>Requirements → Parameters → SolidWorks → Simulation → Drawings → Renderings</strong>
-            <p>Every stage stays visible, editable, and traceable so the CAD model can evolve directly from uploaded requirements and AI recommendations.</p>
-          </aside>
-        </section>
-
-        <section class="metric-grid" id="metricGrid" aria-label="Workspace metrics"></section>
-
-        <section class="workspace-grid" id="workspace">
-          <article class="panel" id="copilotPanel"></article>
-          <article class="panel" id="workspacePanel"></article>
-          <aside class="panel-stack">
-            <article class="panel" id="requirementsPanel"></article>
-            <article class="panel" id="operationsPanel"></article>
-          </aside>
-        </section>
-
-        <section class="bottom-grid">
-          <article class="panel" id="parametersPanel"></article>
-          <article class="panel" id="artifactsPanel"></article>
-        </section>
-
-        <section class="panel" id="timelinePanel"></section>
-      </main>
-    </div>
+    <main class="workbench">
+      <section id="copilotPanel" class="panel copilot-panel" aria-label="AI copilot"></section>
+      <section id="requirementsPanel" class="panel requirements-panel" aria-label="Requirements intake"></section>
+      <section id="modelPanel" class="panel model-panel" aria-label="Model"></section>
+      <section id="specsPanel" class="panel specs-panel" aria-label="Current model specifications"></section>
+    </main>
   </div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>
