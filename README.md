@@ -51,12 +51,10 @@ For production, the recommended architecture is:
 
 ## GitHub Pages
 
-This repo includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`.
+This repo is set up to publish directly from the `main` branch root.
 
 After the repository is pushed to GitHub:
 
-1. Re-authenticate GitHub CLI on this machine.
-2. Create the remote repository.
-3. Push `main`.
-4. In GitHub, open **Settings → Pages** and set the source to **GitHub Actions** if it is not already selected.
-5. The workflow will publish the site automatically on each push to `main`.
+1. Open **Settings -> Pages**.
+2. Confirm the source is the `main` branch and the root folder (`/`).
+3. GitHub Pages will publish the site automatically.
