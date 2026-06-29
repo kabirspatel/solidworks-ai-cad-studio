@@ -25,6 +25,27 @@ const NUMBER_WORDS = {
   ten: 10
 };
 
+const MATERIAL_LIBRARY = {
+  "PC-ABS": { process: "Injection molding", feasibility: 88, lca: 62, notes: "Strong enclosure baseline; petrochemical resin and end-of-life recovery need review." },
+  "Medical-grade PC-ABS": { process: "Injection molding", feasibility: 84, lca: 58, notes: "Good cleanability and impact behavior; verify medical compliance and resin availability." },
+  ABS: { process: "Injection molding", feasibility: 82, lca: 55, notes: "Easy to tool and prototype; weaker sustainability profile." },
+  PET: { process: "Blow molding", feasibility: 86, lca: 70, notes: "Strong bottle baseline; high recycling familiarity." },
+  PETG: { process: "Thermoforming or additive prototyping", feasibility: 76, lca: 61, notes: "Useful for prototypes; production route needs closer review." },
+  PP: { process: "Injection molding or thermoforming", feasibility: 81, lca: 68, notes: "Low density and good processability; stiffness tradeoffs need FEA." },
+  "Aluminum 6061-T6": { process: "CNC machining or forming", feasibility: 79, lca: 64, notes: "High stiffness and recyclability; embodied energy is high." },
+  "Stainless steel": { process: "Sheet forming or machining", feasibility: 74, lca: 60, notes: "Durable and cleanable; mass and process energy are concerns." },
+  "Mixed materials": { process: "Assembly", feasibility: 66, lca: 48, notes: "Separability and end-of-life strategy need definition." }
+};
+
+const AGENT_LANES = [
+  { key: "design", label: "Design", role: "Generate geometry options and feature logic." },
+  { key: "standards", label: "Standards", role: "Check requirements, manufacturing rules, and constraints." },
+  { key: "solidworks", label: "SolidWorks", role: "Translate parameters into CAD operations." },
+  { key: "fea", label: "FEA", role: "Run analysis and critique weak regions." },
+  { key: "material", label: "Material", role: "Assess feasibility, process, and LCA." },
+  { key: "lca", label: "LCA", role: "Compare sustainability and end-of-life impact." }
+];
+
 const CAD_LIBRARY = {
   enclosure: {
     label: "Enclosure",
@@ -141,7 +162,27 @@ function createDefaultState() {
     concept: blueprint.concept,
     requirements: blueprint.requirements,
     parameters: blueprint.parameters,
-    solidworksIntent: blueprint.solidworksIntent
+    solidworksIntent: blueprint.solidworksIntent,
+    geometry: {
+      images: [],
+      transitionMatrix: [],
+      lastMessage: "No image geometry extracted yet"
+    },
+    designTable: {
+      rows: [],
+      lastImport: "",
+      lastMessage: "No spreadsheet linked yet"
+    },
+    analysis: {
+      simulation: null,
+      optimization: null,
+      material: buildMaterialAssessment(blueprint.concept.material, blueprint.parameters)
+    },
+    agents: AGENT_LANES.map(agent => ({
+      ...agent,
+      status: "Waiting",
+      result: "Ready to run"
+    }))
   };
 }
 
@@ -156,7 +197,20 @@ function normalizeState(saved) {
     uploadedFiles: Array.isArray(saved.uploadedFiles) ? saved.uploadedFiles : [],
     requirements: Array.isArray(saved.requirements) && saved.requirements.length ? saved.requirements : defaults.requirements,
     parameters: Array.isArray(saved.parameters) && saved.parameters.length ? saved.parameters : defaults.parameters,
-    solidworksIntent: saved.solidworksIntent || defaults.solidworksIntent
+    solidworksIntent: saved.solidworksIntent || defaults.solidworksIntent,
+    geometry: {
+      ...defaults.geometry,
+      ...(saved.geometry || {}),
+      images: Array.isArray(saved.geometry?.images) ? saved.geometry.images : defaults.geometry.images,
+      transitionMatrix: Array.isArray(saved.geometry?.transitionMatrix) ? saved.geometry.transitionMatrix : defaults.geometry.transitionMatrix
+    },
+    designTable: {
+      ...defaults.designTable,
+      ...(saved.designTable || {}),
+      rows: Array.isArray(saved.designTable?.rows) ? saved.designTable.rows : defaults.designTable.rows
+    },
+    analysis: { ...defaults.analysis, ...(saved.analysis || {}) },
+    agents: Array.isArray(saved.agents) && saved.agents.length ? saved.agents : defaults.agents
   };
 }
 
@@ -188,6 +242,13 @@ function sanitizeFilename(value = "model") {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "model";
 }
 
+function toSolidWorksDimensionName(parameter, index) {
+  const clean = sanitizeFilename(parameter.key || parameter.label || `dimension-${index + 1}`)
+    .replace(/-/g, "_")
+    .toUpperCase();
+  return `D${index + 1}@${clean}`;
+}
+
 function round(value, digits = 1) {
   const multiplier = 10 ** digits;
   return Math.round(Number(value) * multiplier) / multiplier;
@@ -216,6 +277,442 @@ function formatValue(value, unit) {
 function getParameter(key, fallback = 0) {
   const match = state.parameters.find(item => item.key === key);
   return match ? Number(match.value) : fallback;
+}
+
+function materialRecord(material) {
+  return MATERIAL_LIBRARY[material] || MATERIAL_LIBRARY[Object.keys(MATERIAL_LIBRARY).find(key => material?.includes(key))] || MATERIAL_LIBRARY["Mixed materials"];
+}
+
+function buildMaterialAssessment(material, parameters = []) {
+  const record = materialRecord(material);
+  const wall = Number(parameters.find(item => /wall|thickness/i.test(item.key))?.value || 2.5);
+  const countPenalty = parameters.filter(item => item.unit === "count").reduce((sum, item) => sum + Math.max(0, Number(item.value) - 4), 0);
+  const feasibility = clamp(Math.round(record.feasibility + wall * 1.2 - countPenalty * 1.5), 35, 98);
+  const lca = clamp(Math.round(record.lca - Math.max(0, wall - 2.5) * 3 - countPenalty), 20, 96);
+  return {
+    material,
+    process: record.process,
+    feasibility,
+    lca,
+    decomposition: lca >= 70 ? "Favorable" : lca >= 55 ? "Review" : "Constrained",
+    recommendation: feasibility >= 82 && lca >= 65 ? "Proceed to bridge validation" : "Review material/process tradeoffs before release",
+    notes: record.notes
+  };
+}
+
+function buildSimulationResult() {
+  const length = getParameter("length", getParameter("baseLength", 160));
+  const width = getParameter("width", getParameter("baseWidth", getParameter("bodyDiameter", 80)));
+  const height = getParameter("height", getParameter("legHeight", getParameter("depth", 42)));
+  const wall = getParameter("wall", getParameter("thickness", 2.5));
+  const radius = getParameter("cornerRadius", getParameter("filletRadius", getParameter("baseRadius", 6)));
+  const span = Math.max(length, width, height);
+  const safetyFactor = round(clamp(1.05 + wall * 0.22 + radius * 0.02 - span * 0.0014, 0.75, 2.8), 2);
+  const massIndex = round(clamp((length * width * Math.max(height, 1) * Math.max(wall, 0.8)) / 100000, 0.1, 99), 2);
+  const status = safetyFactor >= 1.45 ? "Pass" : safetyFactor >= 1.15 ? "Review" : "Hold";
+  return {
+    status,
+    safetyFactor,
+    massIndex,
+    critique: status === "Pass" ? "Local estimate clears the first structural screen." : "Increase wall, soften high-curvature transitions, or reduce unsupported span.",
+    generatedAt: new Date().toISOString(),
+    source: "Local estimate"
+  };
+}
+
+function buildOptimizationResult(simulation = state.analysis.simulation || buildSimulationResult()) {
+  const recommendations = [];
+  if (simulation.safetyFactor < 1.45) recommendations.push("Increase wall thickness by 0.3 mm or add ribs near long spans.");
+  if ((state.analysis.material?.lca || 0) < 65) recommendations.push("Compare PP, PET, or recycled-content alternatives for lifecycle impact.");
+  if (state.geometry.images.length) recommendations.push("Use extracted contour profiles as guide curves before committing feature edits.");
+  if (!recommendations.length) recommendations.push("Proceed to SolidWorks rebuild and formal simulation.");
+  return {
+    status: simulation.status === "Pass" ? "Ready" : "Needs review",
+    recommendations,
+    nextRevision: `R${String(state.revision + 1).padStart(2, "0")}`,
+    generatedAt: new Date().toISOString(),
+    source: "Local optimization"
+  };
+}
+
+function parseDelimitedTable(text) {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  const headers = lines[0].split(delimiter).map(item => item.trim().toLowerCase());
+  return lines.slice(1).map(line => {
+    const values = line.split(delimiter).map(item => item.trim());
+    return headers.reduce((row, header, index) => {
+      row[header] = values[index] || "";
+      return row;
+    }, {});
+  });
+}
+
+function decodeXmlEntities(value = "") {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function xmlAttribute(xml, name) {
+  const match = xml.match(new RegExp(`${name}="([^"]*)"`, "i"));
+  return match ? decodeXmlEntities(match[1]) : "";
+}
+
+function columnIndexFromCellRef(cellRef = "") {
+  const column = cellRef.replace(/\d+/g, "").toUpperCase();
+  return [...column].reduce((sum, char) => sum * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+async function inflateZipEntry(bytes, method) {
+  if (method === 0) return bytes;
+  if (method !== 8) throw new Error("Unsupported XLSX compression method");
+  if (!("DecompressionStream" in window)) throw new Error("This browser cannot unpack compressed XLSX files");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function readZipTextEntries(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const bytes = new Uint8Array(arrayBuffer);
+  let eocdOffset = -1;
+  for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 66000); offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      eocdOffset = offset;
+      break;
+    }
+  }
+  if (eocdOffset < 0) throw new Error("Invalid XLSX archive");
+
+  const entryCount = view.getUint16(eocdOffset + 10, true);
+  let centralOffset = view.getUint32(eocdOffset + 16, true);
+  const decoder = new TextDecoder();
+  const entries = {};
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (view.getUint32(centralOffset, true) !== 0x02014b50) break;
+    const method = view.getUint16(centralOffset + 10, true);
+    const compressedSize = view.getUint32(centralOffset + 20, true);
+    const filenameLength = view.getUint16(centralOffset + 28, true);
+    const extraLength = view.getUint16(centralOffset + 30, true);
+    const commentLength = view.getUint16(centralOffset + 32, true);
+    const localOffset = view.getUint32(centralOffset + 42, true);
+    const name = decoder.decode(bytes.slice(centralOffset + 46, centralOffset + 46 + filenameLength));
+    const shouldRead = /(^xl\/.*\.(xml|rels)$)|(^\[Content_Types\]\.xml$)/i.test(name);
+    if (shouldRead) {
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = bytes.slice(dataOffset, dataOffset + compressedSize);
+      const inflated = await inflateZipEntry(compressed, method);
+      entries[name] = decoder.decode(inflated);
+    }
+    centralOffset += 46 + filenameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+function parseSharedStrings(xml = "") {
+  return [...xml.matchAll(/<si\b[\s\S]*?<\/si>/gi)].map(match => {
+    const textParts = [...match[0].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi)].map(textMatch => decodeXmlEntities(textMatch[1]));
+    return textParts.join("");
+  });
+}
+
+function resolveFirstWorksheet(entries) {
+  const workbook = entries["xl/workbook.xml"] || "";
+  const rels = entries["xl/_rels/workbook.xml.rels"] || "";
+  const firstSheet = workbook.match(/<sheet\b[^>]*>/i)?.[0] || "";
+  const relationId = xmlAttribute(firstSheet, "r:id");
+  if (relationId && rels) {
+    const relation = [...rels.matchAll(/<Relationship\b[^>]*>/gi)]
+      .map(match => match[0])
+      .find(node => xmlAttribute(node, "Id") === relationId);
+    const target = relation ? xmlAttribute(relation, "Target").replace(/^\/?xl\//, "") : "";
+    if (target && entries[`xl/${target}`]) return entries[`xl/${target}`];
+  }
+
+  const worksheetName = Object.keys(entries).find(name => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name));
+  return worksheetName ? entries[worksheetName] : "";
+}
+
+function parseWorksheetRows(xml, sharedStrings) {
+  const rows = [];
+  for (const rowMatch of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gi)) {
+    const row = [];
+    let nextIndex = 0;
+    for (const cellMatch of rowMatch[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/gi)) {
+      const attributes = cellMatch[1];
+      const cellXml = cellMatch[2];
+      const cellRef = xmlAttribute(attributes, "r");
+      const columnIndex = cellRef ? columnIndexFromCellRef(cellRef) : nextIndex;
+      const type = xmlAttribute(attributes, "t");
+      const valueMatch = cellXml.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i);
+      const inlineText = [...cellXml.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi)].map(match => decodeXmlEntities(match[1])).join("");
+      const rawValue = valueMatch ? decodeXmlEntities(valueMatch[1]) : inlineText;
+      row[columnIndex] = type === "s" ? sharedStrings[Number(rawValue)] || "" : rawValue;
+      nextIndex = columnIndex + 1;
+    }
+    while (row.length && !String(row[row.length - 1] ?? "").trim()) row.pop();
+    if (row.some(value => String(value ?? "").trim())) rows.push(row);
+  }
+  return rows;
+}
+
+async function parseXlsxTable(file) {
+  const entries = await readZipTextEntries(await file.arrayBuffer());
+  const worksheet = resolveFirstWorksheet(entries);
+  if (!worksheet) throw new Error("No worksheet found in Excel file");
+  const sharedStrings = parseSharedStrings(entries["xl/sharedStrings.xml"]);
+  const rows = parseWorksheetRows(worksheet, sharedStrings);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(value => String(value || "").trim().toLowerCase());
+  return rows.slice(1).map(values => headers.reduce((row, header, index) => {
+    if (header) row[header] = String(values[index] ?? "").trim();
+    return row;
+  }, {}));
+}
+
+function rowValue(row, keys) {
+  for (const key of keys) {
+    const normalized = key.toLowerCase();
+    const compact = normalized.replace(/[^a-z0-9]/g, "");
+    const match = Object.entries(row).find(([rowKey, value]) => {
+      const rowCompact = rowKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return value !== "" && (rowKey.toLowerCase() === normalized || rowCompact === compact);
+    });
+    if (match) return match[1];
+  }
+  return "";
+}
+
+function importParameterRows(rows) {
+  let changed = 0;
+  state.parameters = state.parameters.map(parameter => {
+    const match = rows.find(row => {
+      const name = rowValue(row, ["parameter", "param", "key", "name", "spec", "label"]);
+      const sw = rowValue(row, ["swDimension", "SW dimension", "SolidWorks dimension", "dimension", "solidworks", "sw"]);
+      return name.toLowerCase() === parameter.key.toLowerCase()
+        || name.toLowerCase() === parameter.label.toLowerCase()
+        || sw.toLowerCase() === String(parameter.swDimension || "").toLowerCase();
+    });
+    if (!match) return parameter;
+    const value = Number(rowValue(match, ["value", "val", "mm", "dimensionValue", "dimension value", "value mm", "value (mm)"]));
+    if (!Number.isFinite(value)) return parameter;
+    changed += 1;
+    return {
+      ...parameter,
+      value,
+      unit: rowValue(match, ["unit", "units"]) || parameter.unit,
+      source: "Spreadsheet"
+    };
+  });
+  if (changed) {
+    state.revision += 1;
+    state.designTable.rows = buildDesignTableRows();
+    state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  }
+  return changed;
+}
+
+function buildDesignTableRows() {
+  return state.parameters.map((parameter, index) => ({
+    parameter: parameter.key,
+    label: parameter.label,
+    value: parameter.value,
+    unit: parameter.unit,
+    swDimension: parameter.swDimension || toSolidWorksDimensionName(parameter, index),
+    configuration: "Default",
+    source: parameter.source
+  }));
+}
+
+function designTableCsv() {
+  const rows = state.designTable.rows.length ? state.designTable.rows : buildDesignTableRows();
+  const headers = ["configuration", "parameter", "label", "value", "unit", "swDimension", "source"];
+  const escapeCell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  return [headers.join(","), ...rows.map(row => headers.map(header => escapeCell(row[header])).join(","))].join("\n");
+}
+
+function downloadText(filename, text, type = "text/plain") {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([text], { type }));
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+
+async function handleTableUpload(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  let imported = 0;
+  const messages = [];
+
+  for (const file of files) {
+    if (/\.(csv|tsv|txt)$/i.test(file.name)) {
+      const rows = parseDelimitedTable(await file.text());
+      const changed = importParameterRows(rows);
+      imported += changed;
+      messages.push(`${file.name}: ${changed} specs linked`);
+    } else if (/\.xlsx$/i.test(file.name)) {
+      try {
+        const rows = await parseXlsxTable(file);
+        const changed = importParameterRows(rows);
+        imported += changed;
+        messages.push(`${file.name}: ${changed} Excel specs linked`);
+      } catch (error) {
+        messages.push(`${file.name}: bridge-side parsing needed (${error.message})`);
+      }
+    } else {
+      messages.push(`${file.name}: unsupported table format`);
+    }
+  }
+
+  state.designTable.rows = buildDesignTableRows();
+  state.designTable.lastImport = new Date().toISOString();
+  state.designTable.lastMessage = messages.join("; ");
+  persist(imported ? `${imported} spreadsheet specs imported` : "Spreadsheet stored for bridge");
+}
+
+function exportDesignTable() {
+  syncDraftFromDom();
+  state.designTable.rows = buildDesignTableRows();
+  state.designTable.lastMessage = "Design table CSV exported";
+  persist();
+  downloadText(`${sanitizeFilename(state.concept.title)}-solidworks-design-table.csv`, designTableCsv(), "text/csv");
+  showToast("SolidWorks design table exported");
+}
+
+function readImageDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+}
+
+async function extractContourProfile(file) {
+  const dataUrl = await readImageDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const width = 180;
+  const height = Math.max(120, Math.round(image.height * (width / image.width)));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, width, height);
+  const { data } = ctx.getImageData(0, 0, width, height);
+  const profile = [];
+  let edgeCount = 0;
+  const rowStep = Math.max(2, Math.floor(height / 44));
+
+  for (let y = rowStep; y < height - rowStep; y += rowStep) {
+    let left = null;
+    let right = null;
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = (y * width + x) * 4;
+      const prev = (y * width + x - 1) * 4;
+      const next = (y * width + x + 1) * 4;
+      const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+      const grayPrev = data[prev] * 0.299 + data[prev + 1] * 0.587 + data[prev + 2] * 0.114;
+      const grayNext = data[next] * 0.299 + data[next + 1] * 0.587 + data[next + 2] * 0.114;
+      const contrast = Math.abs(gray - grayPrev) + Math.abs(gray - grayNext);
+      if (contrast > 54) {
+        edgeCount += 1;
+        if (left === null) left = x;
+        right = x;
+      }
+    }
+    if (left !== null && right !== null && right - left > width * 0.08) {
+      profile.push({
+        y: round(y / height, 3),
+        left: round((left / width - 0.5) * 2, 3),
+        right: round((right / width - 0.5) * 2, 3),
+        width: round((right - left) / width, 3)
+      });
+    }
+  }
+
+  return {
+    name: file.name,
+    originalWidth: image.width,
+    originalHeight: image.height,
+    sampleWidth: width,
+    sampleHeight: height,
+    edgeCount,
+    confidence: clamp(Math.round((profile.length / 40) * 100), 0, 100),
+    profile: profile.slice(0, 48),
+    extractedAt: new Date().toISOString()
+  };
+}
+
+function buildTransitionMatrix(images = state.geometry.images) {
+  if (images.length < 2) return [];
+  const [from, to] = images;
+  const steps = 5;
+  const count = Math.min(from.profile.length, to.profile.length, 32);
+  return Array.from({ length: steps }, (_, stepIndex) => {
+    const t = round(stepIndex / (steps - 1), 2);
+    return {
+      step: stepIndex + 1,
+      blend: t,
+      profile: Array.from({ length: count }, (_, index) => {
+        const a = from.profile[index];
+        const b = to.profile[index];
+        return {
+          y: round(a.y * (1 - t) + b.y * t, 3),
+          left: round(a.left * (1 - t) + b.left * t, 3),
+          right: round(a.right * (1 - t) + b.right * t, 3),
+          width: round(a.width * (1 - t) + b.width * t, 3)
+        };
+      })
+    };
+  });
+}
+
+async function handleImageUpload(fileList) {
+  const files = [...fileList].filter(file => /^image\//.test(file.type));
+  if (!files.length) {
+    showToast("Upload image files for contour extraction");
+    return;
+  }
+
+  loadingAction = "image-geometry";
+  render();
+
+  try {
+    const profiles = [];
+    for (const file of files) {
+      profiles.push(await extractContourProfile(file));
+    }
+    state.geometry.images = [...profiles, ...state.geometry.images].slice(0, 4);
+    state.geometry.transitionMatrix = buildTransitionMatrix(state.geometry.images);
+    state.geometry.lastMessage = `${profiles.length} image${profiles.length === 1 ? "" : "s"} converted to contour profiles`;
+    persist("Image geometry extracted");
+  } catch (error) {
+    state.geometry.lastMessage = error.message;
+    persist(error.message);
+  } finally {
+    loadingAction = "";
+    render();
+  }
 }
 
 function inferFamily(text, selectedTemplate) {
@@ -324,11 +821,11 @@ function buildModelBlueprint(prompt, requirementText, selectedTemplate) {
   const combined = `${prompt}\n${requirementText}`.trim();
   const family = inferFamily(combined, selectedTemplate);
   const library = CAD_LIBRARY[family] || CAD_LIBRARY.assembly;
-  const parameters = library.parameters.map(definition => {
+  const parameters = library.parameters.map((definition, index) => {
     const result = definition.type === "count"
       ? extractCount(combined, definition.aliases, definition.fallback)
       : extractNumber(combined, definition.aliases, definition.fallback, definition.unit);
-    return { ...definition, value: result.value, source: result.source };
+    return { ...definition, value: result.value, source: result.source, swDimension: toSolidWorksDimensionName(definition, index) };
   });
   const material = extractMaterial(combined, library.defaultMaterial);
   const title = extractTitle(prompt, requirementText, library.defaultTitle);
@@ -396,7 +893,11 @@ function makeCurrentModelPayload() {
     requirementsText: state.requirementText,
     extractedRequirements: state.requirements,
     concept: state.concept,
-    parameters: state.parameters.map(({ key, label, unit, value, source }) => ({ key, label, unit, value, source })),
+    parameters: state.parameters.map(({ key, label, unit, value, source, swDimension }) => ({ key, label, unit, value, source, swDimension })),
+    imageGeometry: state.geometry,
+    designTable: state.designTable,
+    analysis: state.analysis,
+    agents: state.agents,
     solidworksIntent: state.solidworksIntent,
     targetDocument: state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`
   };
@@ -410,6 +911,10 @@ function updateFromBlueprint(blueprint, source = "Local parser") {
   state.solidworksIntent = blueprint.solidworksIntent;
   state.bridge.activeDocument = blueprint.targetDoc;
   state.bridge.lastMessage = `${source} updated revision R${String(state.revision).padStart(2, "0")}`;
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  state.analysis.simulation = null;
+  state.analysis.optimization = null;
+  state.designTable.rows = buildDesignTableRows();
 }
 
 function generateModel() {
@@ -443,6 +948,10 @@ function applyParameterChanges() {
 
   state.revision += 1;
   state.bridge.lastMessage = `${changed} specs changed on R${String(state.revision).padStart(2, "0")}`;
+  state.designTable.rows = buildDesignTableRows();
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  state.analysis.simulation = null;
+  state.analysis.optimization = null;
   persist("Specs updated");
 }
 
@@ -459,10 +968,15 @@ function applyAiPayload(payload, fallbackReply) {
         label: String(item.label || base.label || item.key || `Parameter ${index + 1}`),
         unit: String(item.unit || base.unit || "mm"),
         value: Number.isFinite(Number(item.value)) ? Number(item.value) : Number(base.value || base.fallback || 0),
-        source: item.source || "AI"
+        source: item.source || "AI",
+        swDimension: item.swDimension || base.swDimension || toSolidWorksDimensionName(item, index)
       };
     })
-    : localBlueprint.parameters.map(item => ({ ...item, source: item.source === "Requirement" ? "Requirement" : "AI" }));
+    : localBlueprint.parameters.map((item, index) => ({
+      ...item,
+      source: item.source === "Requirement" ? "Requirement" : "AI",
+      swDimension: item.swDimension || toSolidWorksDimensionName(item, index)
+    }));
 
   const title = payload.title || localBlueprint.concept.title;
   state.revision += 1;
@@ -480,6 +994,16 @@ function applyAiPayload(payload, fallbackReply) {
   state.bridge.lastMessage = `AI updated revision R${String(state.revision).padStart(2, "0")}`;
   state.ai.status = state.ai.mode === "openai" ? "OpenAI connected" : state.ai.mode === "bridge" ? "Endpoint connected" : "Parser";
   state.ai.lastReply = payload.reply || fallbackReply || "AI updated the current model.";
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  if (payload.analysis) {
+    state.analysis = {
+      ...state.analysis,
+      ...payload.analysis,
+      material: payload.analysis.material || state.analysis.material
+    };
+  }
+  if (Array.isArray(payload.agents) && payload.agents.length) state.agents = payload.agents;
+  state.designTable.rows = buildDesignTableRows();
 }
 
 function makeAiInstruction() {
@@ -494,8 +1018,12 @@ function makeAiInstruction() {
     '  "requirements": ["requirement"],',
     '  "parameters": [{"key":"length","label":"Length","unit":"mm","value":170,"source":"AI"}],',
     '  "features": ["SolidWorks feature"],',
-    '  "solidworksIntent": {"documentType":"part","rebuildMode":"parametric","operations":[{"order":1,"name":"Base shell","action":"create_or_update"}]}',
+    '  "solidworksIntent": {"documentType":"part","rebuildMode":"parametric","operations":[{"order":1,"name":"Base shell","action":"create_or_update"}]},',
+    '  "analysis": {"simulation": null, "optimization": null, "material": null},',
+    '  "agents": [{"key":"design","label":"Design","status":"Ready","result":"summary"}]',
     "}",
+    "Use imageGeometry profiles as guide-curve inputs when available.",
+    "Use designTable rows as SolidWorks dimension mappings when available.",
     "Keep parameters numeric and use millimeters unless another unit is required."
   ].join("\n");
 }
@@ -673,6 +1201,109 @@ async function sendToSolidWorks() {
   }
 }
 
+async function postBridge(endpoint, actionLabel) {
+  syncDraftFromDom();
+  if (!state.bridge.url) throw new Error("Add a SolidWorks bridge URL");
+  const baseUrl = normalizeBaseUrl(state.bridge.url);
+  const response = await fetch(`${baseUrl}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(makeCurrentModelPayload())
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || data.error || `${actionLabel} failed (${response.status})`);
+  state.bridge.status = "Synced";
+  state.bridge.lastSync = new Date().toISOString();
+  state.bridge.embedUrl = data.embedUrl || data.viewerUrl || state.bridge.embedUrl || `${baseUrl}/viewer`;
+  state.bridge.lastMessage = data.message || `${actionLabel} completed`;
+  return data;
+}
+
+async function runSimulation() {
+  loadingAction = "simulate";
+  render();
+  try {
+    const data = await postBridge("/api/simulate", "Simulation");
+    state.analysis.simulation = data.simulation || data;
+    state.analysis.simulation.source = state.analysis.simulation.source || "SolidWorks bridge";
+    persist("Simulation complete");
+  } catch (error) {
+    state.analysis.simulation = buildSimulationResult();
+    state.bridge.lastMessage = `Bridge unavailable; ${state.analysis.simulation.source.toLowerCase()} used`;
+    persist("Local simulation estimate generated");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function optimizeModel() {
+  loadingAction = "optimize";
+  render();
+  try {
+    const data = await postBridge("/api/optimize", "Optimization");
+    state.analysis.optimization = data.optimization || data;
+    state.analysis.optimization.source = state.analysis.optimization.source || "SolidWorks bridge";
+    if (Array.isArray(data.parameters) && data.parameters.length) {
+      state.parameters = data.parameters;
+      state.designTable.rows = buildDesignTableRows();
+    }
+    persist("Optimization complete");
+  } catch (error) {
+    state.analysis.optimization = buildOptimizationResult();
+    state.bridge.lastMessage = `Bridge unavailable; ${state.analysis.optimization.source.toLowerCase()} used`;
+    persist("Local optimization suggestions generated");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function assessMaterial() {
+  loadingAction = "material";
+  render();
+  try {
+    const data = await postBridge("/api/material-assessment", "Material assessment");
+    state.analysis.material = data.materialAssessment || data;
+    state.analysis.material.source = state.analysis.material.source || "Bridge";
+    persist("Material/LCA assessment complete");
+  } catch (error) {
+    state.analysis.material = { ...buildMaterialAssessment(state.concept.material, state.parameters), source: "Local material model" };
+    state.bridge.lastMessage = "Bridge unavailable; local material/LCA estimate used";
+    persist("Local material/LCA assessment generated");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function runAgents() {
+  loadingAction = "agents";
+  render();
+  try {
+    const data = await postBridge("/api/agents/run", "Agent workflow");
+    state.agents = Array.isArray(data.agents) ? data.agents : state.agents;
+    persist("Agent workflow complete");
+  } catch (error) {
+    state.agents = AGENT_LANES.map(agent => {
+      const result = {
+        design: `${state.concept.features.length} features queued from current parameters`,
+        standards: `${state.requirements.length} requirements mapped`,
+        solidworks: `${state.designTable.rows.length || state.parameters.length} design-table rows ready`,
+        fea: state.analysis.simulation ? `${state.analysis.simulation.status} safety factor ${state.analysis.simulation.safetyFactor || "pending"}` : "Run simulation next",
+        material: `${state.analysis.material.material}: feasibility ${state.analysis.material.feasibility}/100`,
+        lca: `LCA ${state.analysis.material.lca}/100, decomposition ${state.analysis.material.decomposition}`
+      }[agent.key];
+      return { ...agent, status: "Local", result };
+    });
+    state.bridge.lastMessage = "Bridge unavailable; local agent workflow used";
+    persist("Local agent workflow generated");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
 async function handleRequirementUpload(fileList) {
   const files = [...fileList];
   if (!files.length) return;
@@ -771,6 +1402,18 @@ function renderCopilot() {
           <button class="button secondary" data-action="generate-model">Local generate</button>
         </div>
         <div class="ai-output">${escapeHtml(state.ai.lastReply)}</div>
+        <div>
+          <label>Agent lanes</label>
+          <div class="agent-grid">
+            ${state.agents.map(agent => `
+              <article class="agent-card">
+                <span>${escapeHtml(agent.label)}</span>
+                <strong>${escapeHtml(agent.status)}</strong>
+                <p>${escapeHtml(agent.result || agent.role)}</p>
+              </article>
+            `).join("")}
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -803,6 +1446,16 @@ function renderRequirements() {
             <input id="requirementFiles" type="file" multiple>
           </div>
         </div>
+        <div class="field-row">
+          <div>
+            <label for="imageFiles">Reference images</label>
+            <input id="imageFiles" type="file" accept="image/*" multiple>
+          </div>
+          <div>
+            <label for="tableFiles">Spreadsheet/design table</label>
+            <input id="tableFiles" type="file" accept=".csv,.tsv,.txt,.xlsx" multiple>
+          </div>
+        </div>
         <div>
           <label for="requirementText">Requirements</label>
           <textarea id="requirementText">${escapeHtml(state.requirementText)}</textarea>
@@ -810,15 +1463,36 @@ function renderRequirements() {
         <div class="button-row">
           <button class="button primary" data-action="generate-model">Generate model</button>
           <button class="button secondary" data-action="ask-ai">Send to AI</button>
+          <button class="button secondary" data-action="export-design-table">Export design table</button>
           <button class="button ghost" data-action="reset-demo">Reset</button>
         </div>
-        <div class="upload-list">
-          ${state.uploadedFiles.length ? state.uploadedFiles.map(file => `
+        <div class="intake-grid">
+          <div class="upload-list">
+            ${state.uploadedFiles.length ? state.uploadedFiles.map(file => `
+              <div class="upload-item">
+                <strong>${escapeHtml(file.name)}</strong>
+                <span>${file.parsed ? "parsed" : "stored"}</span>
+              </div>
+            `).join("") : `<div class="upload-item"><strong>No brief files</strong><span>txt, md, json, csv</span></div>`}
+          </div>
+          <div class="upload-list">
+            ${state.geometry.images.length ? state.geometry.images.map(image => `
+              <div class="upload-item">
+                <strong>${escapeHtml(image.name)}</strong>
+                <span>${image.confidence}% contour</span>
+              </div>
+            `).join("") : `<div class="upload-item"><strong>No image profiles</strong><span>contours</span></div>`}
+          </div>
+          <div class="upload-list">
             <div class="upload-item">
-              <strong>${escapeHtml(file.name)}</strong>
-              <span>${file.parsed ? "parsed" : "stored"}</span>
+              <strong>${escapeHtml(state.designTable.lastMessage)}</strong>
+              <span>${state.designTable.rows.length || state.parameters.length} rows</span>
             </div>
-          `).join("") : `<div class="upload-item"><strong>No files</strong><span>txt, md, json, csv</span></div>`}
+            <div class="upload-item">
+              <strong>${escapeHtml(state.geometry.lastMessage)}</strong>
+              <span>${state.geometry.transitionMatrix.length} matrix steps</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -845,6 +1519,12 @@ function renderModel() {
         <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>Connect</button>
         <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""}>Send model</button>
       </div>
+      <div class="button-row">
+        <button class="button secondary" data-action="simulate" ${loadingAction === "simulate" ? "disabled" : ""}>Run FEA</button>
+        <button class="button secondary" data-action="optimize" ${loadingAction === "optimize" ? "disabled" : ""}>Optimize</button>
+        <button class="button secondary" data-action="material" ${loadingAction === "material" ? "disabled" : ""}>Material/LCA</button>
+        <button class="button secondary" data-action="run-agents" ${loadingAction === "agents" ? "disabled" : ""}>Run agents</button>
+      </div>
       <div class="model-frame">
         <div class="model-bar">
           <span>${escapeHtml(state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
@@ -860,6 +1540,9 @@ function renderModel() {
         <div class="bridge-card"><span>Status</span><strong>${escapeHtml(state.bridge.status)}</strong></div>
         <div class="bridge-card"><span>Last sync</span><strong>${escapeHtml(formatDate(state.bridge.lastSync))}</strong></div>
         <div class="bridge-card"><span>Bridge message</span><strong>${escapeHtml(state.bridge.lastMessage)}</strong></div>
+        <div class="bridge-card"><span>FEA</span><strong>${escapeHtml(state.analysis.simulation ? `${state.analysis.simulation.status} SF ${state.analysis.simulation.safetyFactor || "-"}` : "Not run")}</strong></div>
+        <div class="bridge-card"><span>Optimization</span><strong>${escapeHtml(state.analysis.optimization ? state.analysis.optimization.status : "Not run")}</strong></div>
+        <div class="bridge-card"><span>Material/LCA</span><strong>${escapeHtml(`${state.analysis.material.feasibility}/100 - LCA ${state.analysis.material.lca}/100`)}</strong></div>
       </div>
     </div>
   `;
@@ -885,15 +1568,17 @@ function renderSpecs() {
               <th>Spec</th>
               <th>Value</th>
               <th>Unit</th>
+              <th>SolidWorks</th>
               <th>Source</th>
             </tr>
           </thead>
           <tbody>
-            ${state.parameters.map(parameter => `
+            ${state.parameters.map((parameter, index) => `
               <tr>
                 <td>${escapeHtml(parameter.label)}</td>
                 <td><input id="param-${escapeHtml(parameter.key)}" type="number" step="0.1" value="${escapeHtml(parameter.value)}"></td>
                 <td>${escapeHtml(parameter.unit)}</td>
+                <td><code>${escapeHtml(parameter.swDimension || toSolidWorksDimensionName(parameter, index))}</code></td>
                 <td><span class="badge ${sourceBadge(parameter.source)}">${escapeHtml(parameter.source)}</span></td>
               </tr>
             `).join("")}
@@ -906,6 +1591,13 @@ function renderSpecs() {
           <h3>${escapeHtml(state.bridge.activeDocument)}</h3>
         </div>
         <p>${escapeHtml(state.requirements.slice(0, 3).join(" "))}</p>
+        <div class="mini-list">
+          <div class="mini-item"><strong>Design table</strong><span>${state.designTable.rows.length || state.parameters.length} rows</span></div>
+          <div class="mini-item"><strong>Image profiles</strong><span>${state.geometry.images.length}</span></div>
+          <div class="mini-item"><strong>FEA</strong><span>${escapeHtml(state.analysis.simulation ? state.analysis.simulation.status : "Pending")}</span></div>
+          <div class="mini-item"><strong>LCA</strong><span>${escapeHtml(`${state.analysis.material.lca}/100`)}</span></div>
+        </div>
+        <p>${escapeHtml(state.analysis.optimization?.recommendations?.[0] || state.analysis.material.recommendation)}</p>
         <div class="chip-list">
           ${state.concept.features.map(feature => `<span class="chip">${escapeHtml(feature)}</span>`).join("")}
         </div>
@@ -997,12 +1689,19 @@ document.addEventListener("click", event => {
   if (action === "apply-parameters") applyParameterChanges();
   if (action === "connect-bridge") connectBridge();
   if (action === "send-model") sendToSolidWorks();
+  if (action === "simulate") runSimulation();
+  if (action === "optimize") optimizeModel();
+  if (action === "material") assessMaterial();
+  if (action === "run-agents") runAgents();
+  if (action === "export-design-table") exportDesignTable();
   if (action === "export-snapshot") exportSnapshot();
   if (action === "reset-demo") resetDemo();
 });
 
 document.addEventListener("change", event => {
   if (event.target.id === "requirementFiles") handleRequirementUpload(event.target.files);
+  if (event.target.id === "imageFiles") handleImageUpload(event.target.files);
+  if (event.target.id === "tableFiles") handleTableUpload(event.target.files);
   if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl"].includes(event.target.id)) {
     syncDraftFromDom();
     persist();

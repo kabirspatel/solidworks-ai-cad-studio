@@ -194,6 +194,7 @@ label,
 
 .fill-panel {
   height: calc(100% - 70px);
+  overflow: auto;
 }
 
 .field-grid {
@@ -332,6 +333,49 @@ textarea {
   max-height: 140px;
   overflow: auto;
   padding: 10px;
+}
+
+.intake-grid,
+.agent-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.intake-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-card {
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.agent-card span {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.agent-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.agent-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .upload-item,
@@ -477,6 +521,11 @@ td input {
   max-width: 126px;
 }
 
+td code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .spec-summary {
   display: grid;
   gap: 10px;
@@ -559,6 +608,8 @@ td input {
   .specs-body,
   .model-tools,
   .bridge-strip,
+  .intake-grid,
+  .agent-grid,
   .field-row,
   .field-row.three {
     grid-template-columns: 1fr;

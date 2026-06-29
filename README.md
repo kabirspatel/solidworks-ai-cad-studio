@@ -7,7 +7,7 @@ A focused dashboard for four jobs:
 - SolidWorks model window
 - current model specs
 
-The GitHub Pages app is static, so it cannot contain private server secrets or directly host a native SolidWorks desktop process. It now exposes real connector points for both.
+The GitHub Pages app is static, so it cannot contain private server secrets or directly host a native SolidWorks desktop process. It now exposes connector points for AI, image-to-geometry, spreadsheet/design-table handoff, SolidWorks automation, FEA feedback, material/LCA checks, and multi-agent review.
 
 ## Open locally
 
@@ -27,6 +27,14 @@ The copilot supports three modes:
 - `Local parser`: deterministic fallback for offline demos.
 
 For production, prefer the `AI endpoint` mode so API keys stay server-side.
+
+The AI payload includes:
+
+- requirements text and extracted requirements
+- current parameters and SolidWorks dimension names
+- image contour profiles and transition matrices
+- SolidWorks design-table rows
+- simulation, optimization, material/LCA, and agent-state context
 
 Expected AI endpoint request:
 
@@ -72,6 +80,20 @@ Expected AI response:
 
 A public browser page cannot embed the native SolidWorks desktop window by itself. The dashboard expects a Windows-side bridge that owns SolidWorks and returns a browser-embeddable viewer URL.
 
+Bridge scaffold:
+
+```sh
+bridge/SolidWorksBridge
+```
+
+Native embedded-window host scaffold:
+
+```sh
+bridge/SolidWorksNativeHost
+```
+
+`SolidWorksNativeHost` is the Windows path for a literal embedded SolidWorks working window. It opens the dashboard in an Edge app window, reparents that dashboard window and the native SolidWorks desktop window into a WPF host surface, and can run alongside `SolidWorksBridge` when you need both embedded windows and automation endpoints.
+
 Required bridge endpoints:
 
 ```http
@@ -103,7 +125,39 @@ Request body is the dashboard model payload. Expected response:
 }
 ```
 
-The bridge should enable CORS for the GitHub Pages origin and serve `/viewer` as the live SolidWorks viewport, usually through a Windows desktop shell, WebView2 host, remote stream, or local viewer service.
+The bridge should enable CORS for the GitHub Pages origin and serve `/viewer` as the live SolidWorks viewport, usually through the included Windows native host, a remote stream, or another local viewer service.
+
+Additional workflow endpoints:
+
+```http
+POST /api/simulate
+POST /api/optimize
+POST /api/material-assessment
+POST /api/agents/run
+```
+
+The included bridge scaffold writes each received payload under `runs/`, generates a SolidWorks design-table CSV, and attempts to connect to `SldWorks.Application` through late-bound COM on Windows.
+
+## Image-to-geometry
+
+Reference image upload runs in the browser. The dashboard samples each image, extracts normalized left/right contour profiles, and builds a transition matrix when two or more images are available.
+
+Those profiles are included in `imageGeometry` in every AI and SolidWorks bridge payload.
+
+## Excel and design tables
+
+The dashboard imports CSV/TSV/TXT files and simple `.xlsx` workbooks locally. It maps rows to parameters by headers such as `parameter`, `key`, `name`, `spec`, `label`, `dimension`, `SW dimension`, `SolidWorks dimension`, or `swDimension`, then applies `value` / `dimension value` into the active specs.
+
+Advanced Excel workbooks can still be parsed bridge-side if needed. The dashboard can always export a SolidWorks design-table CSV from the active specs.
+
+## Feedback loop
+
+The dashboard now has compact actions for:
+
+- `Run FEA`: calls `/api/simulate`, with a local estimate fallback
+- `Optimize`: calls `/api/optimize`, with local recommendations fallback
+- `Material/LCA`: calls `/api/material-assessment`, with local feasibility/LCA fallback
+- `Run agents`: calls `/api/agents/run`, with local agent-lane fallback
 
 ## GitHub Pages
 
