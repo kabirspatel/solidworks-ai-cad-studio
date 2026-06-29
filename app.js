@@ -1,6 +1,8 @@
 const STORAGE_KEY = "solidworks-ai-cad-studio-v3";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const DEFAULT_MODEL = "gpt-5-mini";
+const DEFAULT_BRIDGE_URL = "http://127.0.0.1:8787";
+const DEFAULT_AI_ENDPOINT = "http://127.0.0.1:8787/api/copilot";
 const DEFAULT_PROMPT = "Design a portable diagnostic enclosure for a point-of-care diagnostic device.";
 const DEFAULT_REQUIREMENTS = `Project: Portable diagnostic enclosure
 Overall length 170 mm
@@ -145,14 +147,14 @@ function createDefaultState() {
     uploadedFiles: [],
     revision: 1,
     ai: {
-      mode: "openai",
+      mode: "bridge",
       model: DEFAULT_MODEL,
-      endpoint: "",
-      status: "Needs key",
-      lastReply: "Enter an AI key or endpoint, then ask the copilot to generate or revise the model."
+      endpoint: DEFAULT_AI_ENDPOINT,
+      status: "Mac bridge",
+      lastReply: "Start the MacDevBridge, then ask the copilot to generate or revise the model."
     },
     bridge: {
-      url: "https://localhost:8787",
+      url: DEFAULT_BRIDGE_URL,
       status: "Disconnected",
       embedUrl: "",
       activeDocument: blueprint.targetDoc,
@@ -188,11 +190,15 @@ function createDefaultState() {
 
 function normalizeState(saved) {
   const defaults = createDefaultState();
+  const savedAi = { ...(saved.ai || {}) };
+  const savedBridge = { ...(saved.bridge || {}) };
+  if (!savedAi.endpoint) savedAi.endpoint = defaults.ai.endpoint;
+  if (savedBridge.url === "https://localhost:8787") savedBridge.url = DEFAULT_BRIDGE_URL;
   return {
     ...defaults,
     ...saved,
-    ai: { ...defaults.ai, ...(saved.ai || {}) },
-    bridge: { ...defaults.bridge, ...(saved.bridge || {}) },
+    ai: { ...defaults.ai, ...savedAi },
+    bridge: { ...defaults.bridge, ...savedBridge },
     concept: { ...defaults.concept, ...(saved.concept || {}) },
     uploadedFiles: Array.isArray(saved.uploadedFiles) ? saved.uploadedFiles : [],
     requirements: Array.isArray(saved.requirements) && saved.requirements.length ? saved.requirements : defaults.requirements,

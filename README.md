@@ -18,6 +18,45 @@ python3 -m http.server 8080 --bind 127.0.0.1
 
 Then open [http://localhost:8080](http://localhost:8080).
 
+## Mac development mode
+
+On a MacBook, use the local Mac bridge instead of the Windows SolidWorks bridge:
+
+```sh
+cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
+npm run mac:dev
+```
+
+Or, without npm:
+
+```sh
+node bridge/MacDevBridge/server.mjs
+```
+
+Then open [http://127.0.0.1:8787/](http://127.0.0.1:8787/).
+
+The Mac bridge serves the dashboard and implements the same backend contract as the Windows bridge:
+
+- `GET /health`
+- `POST /api/model`
+- `POST /api/simulate`
+- `POST /api/optimize`
+- `POST /api/material-assessment`
+- `POST /api/agents/run`
+- `POST /api/copilot`
+- `GET /viewer`
+
+Each run writes payloads, design-table CSVs, operation plans, and handoff summaries under `bridge/MacDevBridge/runs/`.
+
+Optional AI proxy:
+
+```sh
+export OPENAI_API_KEY="sk-..."
+npm run mac:dev
+```
+
+Without `OPENAI_API_KEY`, the bridge uses deterministic local responses so the workflow still runs offline.
+
 ## AI integration
 
 The copilot supports three modes:
@@ -84,6 +123,12 @@ Bridge scaffold:
 
 ```sh
 bridge/SolidWorksBridge
+```
+
+Mac bridge scaffold:
+
+```sh
+bridge/MacDevBridge
 ```
 
 Native embedded-window host scaffold:
