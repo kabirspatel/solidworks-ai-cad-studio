@@ -395,10 +395,16 @@ textarea {
 }
 
 .model-tools {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: end;
+}
+
+.bridge-msg {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--quiet, #7a9195);
+  line-height: 1.4;
 }
 
 .cloud-panel {

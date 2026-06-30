@@ -2,10 +2,10 @@ const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const SESSION_CLAUDE_KEY = "solidworks-ai-claude-key";
 const SESSION_GEMINI_KEY = "solidworks-ai-gemini-key";
-const DEFAULT_MODEL = "gpt-5-mini";
+const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_BRIDGE_URL = "";
 const DEFAULT_AI_ENDPOINT = "";
-const DEFAULT_CLOUD_SPACE_URL = "https://my.3dexperience.3ds.com/";
+const DEFAULT_CLOUD_SPACE_URL = "";
 const DEFAULT_XDESIGN_INFO_URL = "https://www.solidworks.com/product/solidworks-xdesign";
 const DEFAULT_PROMPT = "";
 const DEFAULT_REQUIREMENTS = "";
@@ -454,7 +454,7 @@ function createDefaultState() {
       embedUrl: "",
       activeDocument: "new-design.SLDPRT",
       lastSync: "",
-      lastMessage: "Local SolidWorks bridge is optional. Use cloud mode for browser-based CAD."
+      lastMessage: "Not connected. Run bridge/MacDevBridge/server.mjs locally to push parameters to SolidWorks."
     },
     cloud: {
       provider: "3DEXPERIENCE / SOLIDWORKS xDesign",
@@ -466,7 +466,7 @@ function createDefaultState() {
       displayMode: "preview",
       infoUrl: DEFAULT_XDESIGN_INFO_URL,
       lastSync: "",
-      lastMessage: "Sign in to 3DEXPERIENCE/xDesign for browser-based CAD without local SolidWorks."
+      lastMessage: "Paste a public cloud CAD URL below to embed it in the preview window."
     },
     concept: {
       title: "New design",
@@ -1238,7 +1238,7 @@ function syncDraftFromDom() {
   if (aiMode) {
     const newMode = aiMode.value;
     if (newMode !== state.ai.mode) {
-      const modeDefaults = { gemini: "gemini-2.0-flash", claude: "claude-sonnet-4-6", openai: "gpt-4o", bridge: "", parser: "" };
+      const modeDefaults = { gemini: "gemini-2.0-flash", claude: "claude-sonnet-4-6", openai: "gpt-4o-mini", bridge: "", parser: "" };
       state.ai.model = modeDefaults[newMode] || "";
       if (aiModel) aiModel.value = state.ai.model;
     }
@@ -1346,7 +1346,7 @@ function loadBottleVariant(variantId) {
     family: "bottle",
     familyLabel: library.label,
     title: `${variant.id} — ${variant.concept}`,
-    material: "PLA + enzyme additive system",
+    material: state.concept.material || library.defaultMaterial || "",
     features: [...library.features]
   };
   state.parameters = [
@@ -1369,21 +1369,18 @@ function loadBottleVariant(variantId) {
     { key: "helixDepth",    label: "Helix depth",    unit: "mm",    value: variant.helixDepth,  source: "Variant", swDimension: "D17@HELIX_DEPTH",  aliases: [] },
     { key: "helixTurns",    label: "Helix turns",    unit: "",      value: variant.helixTurns,  source: "Variant", swDimension: "D18@HELIX_TURNS",  aliases: [] }
   ];
-  state.prompt = `Load STREAMS bottle variant ${variant.id}: ${variant.concept}`;
+  state.prompt = `Variant ${variant.id}: ${variant.concept} (morph ${variant.morph})`;
   state.requirementText = [
-    `Project: STREAMS ${variant.id} — ${variant.concept}`,
+    `Variant: ${variant.id} — ${variant.concept}`,
     `Morph step: ${variant.morph}`,
     `Nominal fill volume: 500 mL`,
     `Overflow capacity target: 530 mL ±10 mL`,
-    `Material: PLA + enzyme additive system; food-contact grade`,
-    `Neck/closure: 28mm tamper-evident screw; PLA/CPLA cap; linerless plug`,
-    `Required label/code pack: Statement of identity; net quantity; manufacturer/packer/distributor address; lot/date; RIC 7 PLA; compostability qualifier if certified`,
-    `Compliance validation: Food-contact migration; seal/leak; top-load/drop; ASTM D6400 or EN 13432 for compostability claims`
+    `Neck/closure: 28 mm tamper-evident screw finish`,
   ].join("\n");
   state.revision += 1;
   state.bridge.activeDocument = `${variant.id}-${sanitizeFilename(variant.concept)}.SLDPRT`;
   state.designTable.rows = buildDesignTableRows();
-  state.analysis.material = buildMaterialAssessment("PLA + enzyme additive system", state.parameters);
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
   state.analysis.simulation = null;
   state.analysis.optimization = null;
   lookupStandards();
@@ -1530,7 +1527,7 @@ async function callOpenAI() {
   const key = sessionStorage.getItem(SESSION_AI_KEY);
   if (!key) throw new Error("Add an OpenAI API key for this browser session.");
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1538,10 +1535,11 @@ async function callOpenAI() {
     },
     body: JSON.stringify({
       model: state.ai.model || DEFAULT_MODEL,
-      store: false,
-      instructions: makeAiInstruction(),
-      input: JSON.stringify(makeCurrentModelPayload(), null, 2),
-      max_output_tokens: 1600
+      max_tokens: 1600,
+      messages: [
+        { role: "system", content: makeAiInstruction() },
+        { role: "user", content: JSON.stringify(makeCurrentModelPayload(), null, 2) }
+      ]
     })
   });
 
@@ -1550,7 +1548,7 @@ async function callOpenAI() {
     const detail = data.error?.message || `OpenAI request failed (${response.status})`;
     throw new Error(detail);
   }
-  return parseJsonFromText(extractResponseText(data));
+  return parseJsonFromText(data.choices?.[0]?.message?.content || "");
 }
 
 async function callClaude() {
@@ -1908,7 +1906,7 @@ function showCloudFrame() {
 
 function showLocalPreview() {
   state.cloud.displayMode = "preview";
-  state.cloud.lastMessage = "Showing dashboard preview. Use cloud mode to launch 3DEXPERIENCE/xDesign.";
+  state.cloud.lastMessage = "Showing 3D preview.";
   persist("Preview shown");
 }
 
@@ -1926,7 +1924,7 @@ async function connectCloud() {
   syncDraftFromDom();
   if (!state.cloud.brokerUrl) {
     state.cloud.status = "Manual login";
-    state.cloud.lastMessage = "No cloud broker configured. Open 3DEXPERIENCE and sign in with your SOLIDWORKS account.";
+    state.cloud.lastMessage = "No cloud broker configured. Open the cloud CAD URL and sign in first.";
     persist("Open cloud workspace to sign in");
     openCloudWorkspace();
     return;
@@ -2128,57 +2126,71 @@ function renderHeader() {
 }
 
 function renderCopilot() {
-  const keyPresent = Boolean(sessionStorage.getItem(SESSION_AI_KEY));
+  const geminiKeyStored = Boolean(sessionStorage.getItem(SESSION_GEMINI_KEY));
+  const claudeKeyStored = Boolean(sessionStorage.getItem(SESSION_CLAUDE_KEY));
+  const openaiKeyStored = Boolean(sessionStorage.getItem(SESSION_AI_KEY));
+  const modelDefault = state.ai.mode === "gemini" ? "gemini-2.0-flash"
+    : state.ai.mode === "claude" ? "claude-sonnet-4-6"
+    : state.ai.mode === "openai" ? "gpt-4o-mini"
+    : DEFAULT_MODEL;
+
   document.getElementById("copilotPanel").innerHTML = `
     <div class="panel-header">
       <div>
         <span class="eyebrow">AI copilot</span>
-        <h2>Generate and revise</h2>
+        <h2>Generate parameters</h2>
       </div>
-      <span class="badge ${state.ai.mode === "parser" ? "warn" : ""}">${escapeHtml(state.ai.mode)}</span>
+      <span class="badge ${state.ai.mode === "parser" ? "warn" : ""}">
+        ${state.ai.mode === "parser" ? "offline" : state.ai.mode === "gemini" ? "Gemini" : state.ai.mode === "claude" ? "Claude" : state.ai.mode === "openai" ? "OpenAI" : "endpoint"}
+      </span>
     </div>
     <div class="panel-body fill-panel">
       <div class="field-grid">
         <div>
-          <label for="promptInput">Prompt</label>
-          <textarea id="promptInput">${escapeHtml(state.prompt)}</textarea>
+          <label for="promptInput">Design intent</label>
+          <textarea id="promptInput" placeholder="Describe what you need — material, size, constraints, style…">${escapeHtml(state.prompt)}</textarea>
         </div>
         <div class="field-row">
           <div>
-            <label for="aiMode">AI source</label>
+            <label for="aiMode">AI provider</label>
             <select id="aiMode">
-              <option value="gemini" ${state.ai.mode === "gemini" ? "selected" : ""}>Gemini (free)</option>
+              <option value="gemini" ${state.ai.mode === "gemini" ? "selected" : ""}>Gemini (free key)</option>
               <option value="claude" ${state.ai.mode === "claude" ? "selected" : ""}>Claude (Anthropic)</option>
               <option value="openai" ${state.ai.mode === "openai" ? "selected" : ""}>OpenAI</option>
-              <option value="bridge" ${state.ai.mode === "bridge" ? "selected" : ""}>AI endpoint</option>
-              <option value="parser" ${state.ai.mode === "parser" ? "selected" : ""}>Local parser</option>
+              <option value="bridge" ${state.ai.mode === "bridge" ? "selected" : ""}>Custom endpoint</option>
+              <option value="parser" ${state.ai.mode === "parser" ? "selected" : ""}>Local (no key)</option>
             </select>
           </div>
           <div>
             <label for="aiModel">Model</label>
-            <input id="aiModel" value="${escapeHtml(state.ai.model || DEFAULT_MODEL)}" placeholder="${state.ai.mode === "gemini" ? "gemini-2.0-flash" : state.ai.mode === "claude" ? "claude-sonnet-4-6" : state.ai.mode === "openai" ? "gpt-4o" : "model-name"}">
+            <input id="aiModel" value="${escapeHtml(state.ai.model || modelDefault)}" placeholder="${modelDefault}">
           </div>
         </div>
-        <div class="field-grid">
-          ${state.ai.mode === "gemini" ? `
-          <div>
-            <label for="geminiKey">Gemini API key <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">Get free key ↗</a></label>
-            <input id="geminiKey" type="password" placeholder="${sessionStorage.getItem(SESSION_GEMINI_KEY) ? "Key loaded for this tab" : "AIza..."}">
-          </div>` : state.ai.mode === "claude" ? `
-          <div>
-            <label for="claudeKey">Anthropic API key</label>
-            <input id="claudeKey" type="password" placeholder="${sessionStorage.getItem(SESSION_CLAUDE_KEY) ? "Key loaded for this tab" : "sk-ant-..."}">
-          </div>` : state.ai.mode === "openai" ? `
-          <div>
-            <label for="aiKey">OpenAI API key</label>
-            <input id="aiKey" type="password" placeholder="${keyPresent ? "Key loaded for this tab" : "sk-..."}">
-          </div>` : ""}
-          ${state.ai.mode === "bridge" ? `
-          <div>
-            <label for="aiEndpoint">AI endpoint URL</label>
-            <input id="aiEndpoint" value="${escapeHtml(state.ai.endpoint)}" placeholder="https://your-server.example.com/api/copilot">
-          </div>` : ""}
-        </div>
+
+        ${state.ai.mode === "gemini" ? `
+        <div>
+          <label for="geminiKey">Gemini API key ${geminiKeyStored ? '<span class="badge" style="font-weight:400">loaded</span>' : `<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">Get free key ↗</a>`}</label>
+          <input id="geminiKey" type="password" placeholder="${geminiKeyStored ? "Key saved for this tab — paste to replace" : "AIza…"}">
+        </div>` : ""}
+
+        ${state.ai.mode === "claude" ? `
+        <div>
+          <label for="claudeKey">Anthropic API key ${claudeKeyStored ? '<span class="badge" style="font-weight:400">loaded</span>' : ''}</label>
+          <input id="claudeKey" type="password" placeholder="${claudeKeyStored ? "Key saved for this tab — paste to replace" : "sk-ant-…"}">
+        </div>` : ""}
+
+        ${state.ai.mode === "openai" ? `
+        <div>
+          <label for="aiKey">OpenAI API key ${openaiKeyStored ? '<span class="badge" style="font-weight:400">loaded</span>' : ''}</label>
+          <input id="aiKey" type="password" placeholder="${openaiKeyStored ? "Key saved for this tab — paste to replace" : "sk-…"}">
+        </div>` : ""}
+
+        ${state.ai.mode === "bridge" ? `
+        <div>
+          <label for="aiEndpoint">Endpoint URL</label>
+          <input id="aiEndpoint" value="${escapeHtml(state.ai.endpoint)}" placeholder="https://your-server.example.com/api/copilot">
+        </div>` : ""}
+
         <div class="button-row">
           <button class="button primary" data-action="ask-ai" ${loadingAction === "ask-ai" ? "disabled" : ""}>
             ${loadingAction === "ask-ai" ? "Generating…" : "Generate with AI"}
@@ -2329,23 +2341,24 @@ function renderRequirements() {
 
         <div class="field-row">
           <div>
-            <label for="templateSelect">Template</label>
+            <label for="templateSelect">Product type</label>
             <select id="templateSelect">
               <option value="auto" ${state.selectedTemplate === "auto" ? "selected" : ""}>Auto-detect</option>
               <option value="enclosure" ${state.selectedTemplate === "enclosure" ? "selected" : ""}>Enclosure</option>
-              <option value="bottle" ${state.selectedTemplate === "bottle" ? "selected" : ""}>Bottle</option>
+              <option value="bottle" ${state.selectedTemplate === "bottle" ? "selected" : ""}>Bottle / container</option>
               <option value="bracket" ${state.selectedTemplate === "bracket" ? "selected" : ""}>Bracket</option>
               <option value="tray" ${state.selectedTemplate === "tray" ? "selected" : ""}>Tray</option>
               <option value="assembly" ${state.selectedTemplate === "assembly" ? "selected" : ""}>Assembly</option>
             </select>
           </div>
+          ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? `
           <div>
-            <label for="variantSelect">${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? "Jump to variant" : "Variant"}</label>
+            <label for="variantSelect">Seed variant</label>
             <select id="variantSelect">
-              <option value="">— Seed a variant —</option>
-              ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("") : ""}
+              <option value="">— Pick a seed design —</option>
+              ${BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("")}
             </select>
-          </div>
+          </div>` : ""}
         </div>
 
         ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? renderBottleSliders() : `
@@ -2428,73 +2441,75 @@ function renderModel() {
   const cloudViewer = state.cloud.embedUrl || state.cloud.launchUrl || state.cloud.spaceUrl;
   const showCloud = state.cloud.displayMode === "cloud" && cloudViewer;
   const showBridge = !showCloud && state.bridge.embedUrl;
+  const bridgeOk = state.bridge.status === "Connected" || state.bridge.status === "Synced" || state.bridge.status === "Bridge online";
+  const docName = state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`;
+
   document.getElementById("modelPanel").innerHTML = `
     <div class="panel-header">
       <div>
-        <span class="eyebrow">Model</span>
-        <h2>SolidWorks window</h2>
+        <span class="eyebrow">CAD preview</span>
+        <h2>${escapeHtml(docName)}</h2>
       </div>
-      <span class="badge ${showCloud || showBridge ? "good" : "warn"}">${showCloud ? "cloud" : showBridge ? "bridge" : "preview"}</span>
+      <span class="badge ${showCloud || showBridge ? "" : bridgeOk ? "" : "warn"}">${showCloud ? "cloud" : showBridge ? "bridge" : "3D preview"}</span>
     </div>
     <div class="panel-body fill-panel">
+
       <div class="model-tools">
-        <div>
-          <label for="bridgeUrl">MacDevBridge URL <span style="font-size:11px;font-weight:400;color:var(--quiet)">(optional — run bridge/MacDevBridge/server.mjs locally)</span></label>
-          <input id="bridgeUrl" value="${escapeHtml(state.bridge.url)}" placeholder="http://127.0.0.1:8787">
-        </div>
-        <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>Connect</button>
-        <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""} title="Downloads a .swb macro — run it in SolidWorks via Tools › Macros › Run">↓ SolidWorks macro</button>
-      </div>
-      <div class="button-row">
-        <button class="button secondary" data-action="simulate" ${loadingAction === "simulate" ? "disabled" : ""}>Run FEA</button>
-        <button class="button secondary" data-action="optimize" ${loadingAction === "optimize" ? "disabled" : ""}>Optimize</button>
-        <button class="button secondary" data-action="material" ${loadingAction === "material" ? "disabled" : ""}>Material/LCA</button>
-        <button class="button secondary" data-action="run-agents" ${loadingAction === "agents" ? "disabled" : ""}>Run agents</button>
-      </div>
-      <div class="cloud-panel">
-        <div>
-          <label>Browser CAD <span style="font-size:11px;font-weight:400;color:var(--quiet)">— embed Onshape, xDesign, or any cloud CAD URL</span></label>
-        </div>
         <div class="field-row">
           <div>
-            <label for="cloudSpaceUrl">Cloud CAD URL <a href="https://cad.onshape.com" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">Onshape (free) ↗</a></label>
-            <input id="cloudSpaceUrl" value="${escapeHtml(state.cloud.spaceUrl === "https://my.3dexperience.3ds.com/" ? "" : state.cloud.spaceUrl)}" placeholder="https://cad.onshape.com/documents/…">
+            <label for="bridgeUrl">Local bridge <span style="font-size:10px;font-weight:400;color:var(--quiet)">run bridge/MacDevBridge/server.mjs, then connect</span></label>
+            <input id="bridgeUrl" value="${escapeHtml(state.bridge.url)}" placeholder="http://127.0.0.1:8787">
           </div>
           <div>
-            <label for="cadServerUrl">Geometry server URL <span style="font-size:11px;color:var(--quiet)">for real 3D mesh</span></label>
-            <input id="cadServerUrl" value="${escapeHtml(state.cadServer?.url || "")}" placeholder="https://your-service.onrender.com">
+            <label for="cadServerUrl">Geometry server <span style="font-size:10px;font-weight:400;color:var(--quiet)">deploy cad-server/ to Render.com</span></label>
+            <input id="cadServerUrl" value="${escapeHtml(state.cadServer?.url || "")}" placeholder="https://your-cad-server.onrender.com">
           </div>
         </div>
-        <div class="button-row">
-          <button class="button primary" data-action="show-cloud-frame">Show in window</button>
-          <button class="button ghost" data-action="open-cloud">Open in new tab</button>
-          <button class="button ghost" data-action="show-local-preview">3D preview</button>
+        <div class="button-row" style="margin-top:6px">
+          <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>${loadingAction === "connect-bridge" ? "Connecting…" : bridgeOk ? "✓ Bridge connected" : "Connect bridge"}</button>
+          <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""}>↓ Push to SolidWorks</button>
+          <button class="button ghost" data-action="show-local-preview">Refresh 3D</button>
         </div>
-        ${state.cadServer?.url ? `<p style="font-size:11px;color:var(--quiet);margin:4px 0 0">Geometry server: ${escapeHtml(state.cadServer.status || "ready")}</p>` : `<p style="font-size:11px;color:var(--quiet);margin:4px 0 0">No geometry server — deploy <code>cad-server/</code> to Render.com for real parametric STL.</p>`}
+        ${state.bridge.lastMessage && !bridgeOk ? `<p class="bridge-msg">${escapeHtml(state.bridge.lastMessage)}</p>` : ""}
       </div>
+
       <div class="model-frame">
         <div class="model-bar">
-          <span>${escapeHtml(showCloud ? (state.cloud.spaceUrl || "Cloud CAD") : state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
-          <span>${escapeHtml(state.concept.material || "")}</span>
+          <span>${escapeHtml(state.concept.material || "No material set")}</span>
+          <span>${escapeHtml(state.bridge.status)}</span>
         </div>
         <div class="model-embed">
           ${showCloud && cloudViewer ? `
             <iframe title="Cloud CAD workspace" src="${escapeHtml(cloudViewer)}" allow="fullscreen"></iframe>
-            <div class="embed-note">If the CAD app blocks iframe embedding, use "Open in new tab" instead.</div>
+            <div class="embed-note">If the CAD tool blocks iframe embedding, click Open in new tab.</div>
           ` : showBridge ? `<iframe title="Bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
             <div class="preview-stage" id="threeViewport"></div>
           `}
         </div>
       </div>
+
+      ${state.cloud.spaceUrl && state.cloud.spaceUrl !== "https://my.3dexperience.3ds.com/" ? `
+      <div style="padding:8px 0 4px;display:flex;gap:8px;align-items:center">
+        <input id="cloudSpaceUrl" value="${escapeHtml(state.cloud.spaceUrl)}" placeholder="https://cad.onshape.com/documents/…" style="flex:1">
+        <button class="button ghost" data-action="show-cloud-frame">Show</button>
+        <button class="button ghost" data-action="open-cloud">↗</button>
+      </div>
+      ` : `
+      <details style="margin-top:8px">
+        <summary style="font-size:11px;color:var(--quiet);cursor:pointer">Embed cloud CAD (Onshape, xDesign…)</summary>
+        <div style="padding:8px 0 4px;display:flex;gap:8px;align-items:center">
+          <input id="cloudSpaceUrl" value="" placeholder="Paste a public CAD document URL" style="flex:1">
+          <button class="button ghost" data-action="show-cloud-frame">Embed</button>
+          <button class="button ghost" data-action="open-cloud">↗</button>
+        </div>
+      </details>
+      `}
+
       <div class="bridge-strip">
-        <div class="bridge-card"><span>Status</span><strong>${escapeHtml(state.bridge.status)}</strong></div>
-        <div class="bridge-card"><span>Last sync</span><strong>${escapeHtml(formatDate(state.bridge.lastSync))}</strong></div>
-        <div class="bridge-card"><span>Bridge message</span><strong>${escapeHtml(state.bridge.lastMessage)}</strong></div>
-        <div class="bridge-card"><span>FEA</span><strong>${escapeHtml(state.analysis.simulation ? `${state.analysis.simulation.status} SF ${state.analysis.simulation.safetyFactor || "-"}` : "Not run")}</strong></div>
-        <div class="bridge-card"><span>Optimization</span><strong>${escapeHtml(state.analysis.optimization ? state.analysis.optimization.status : "Not run")}</strong></div>
-        <div class="bridge-card"><span>Material/LCA</span><strong>${escapeHtml(`${state.analysis.material.feasibility}/100 - LCA ${state.analysis.material.lca}/100`)}</strong></div>
-        <div class="bridge-card"><span>Cloud</span><strong>${escapeHtml(state.cloud.status)}</strong></div>
-        <div class="bridge-card"><span>Cloud sync</span><strong>${escapeHtml(formatDate(state.cloud.lastSync))}</strong></div>
+        <div class="bridge-card"><span>Bridge</span><strong>${escapeHtml(state.bridge.status)}</strong></div>
+        <div class="bridge-card"><span>Last push</span><strong>${escapeHtml(formatDate(state.bridge.lastSync))}</strong></div>
+        <div class="bridge-card"><span>Parameters</span><strong>${state.parameters.length} specs</strong></div>
+        <div class="bridge-card"><span>Revision</span><strong>R${String(state.revision).padStart(2, "0")}</strong></div>
       </div>
     </div>
   `;
@@ -2644,12 +2659,13 @@ function getP(params, key, fallback) {
 
 function build3DGeometry(family, params) {
   if (family === "bottle") {
-    const H  = getP(params, "height", 232);
-    const R  = getP(params, "bodyDiameter", 58) / 2;
-    const nR = getP(params, "neckDiameter", 28) / 2;
-    const sH = getP(params, "shoulderHeight", 28);
-    const nH = getP(params, "neckHeight", 25);
-    const bH = 8;
+    const H   = getP(params, "height", 232);
+    const R   = getP(params, "bodyDiameter", 58) / 2;
+    const D   = getP(params, "bodyDepth", R * 2) / 2;  // depth radius; default = circular
+    const nR  = getP(params, "neckDiameter", 28) / 2;
+    const sH  = getP(params, "shoulderHeight", 28);
+    const nH  = getP(params, "neckHeight", 25);
+    const bH  = 8;
     const bodyTop = H - sH - nH;
     const pts = [
       new THREE.Vector2(R * 0.35, 0),
@@ -2659,7 +2675,20 @@ function build3DGeometry(family, params) {
       new THREE.Vector2(nR, H - nH),
       new THREE.Vector2(nR, H)
     ];
-    return new THREE.LatheGeometry(pts, 72);
+    const geom = new THREE.LatheGeometry(pts, 72);
+    // Apply oval squeeze when depth differs from diameter
+    if (Math.abs(D - R) > 2) {
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        const bodyRatio = Math.min(1, Math.max(0, (y - bH) / Math.max(1, bodyTop - bH)));
+        const squash = D / R;
+        pos.setZ(i, pos.getZ(i) * (squash * bodyRatio + 1 * (1 - bodyRatio)));
+      }
+      pos.needsUpdate = true;
+      geom.computeVertexNormals();
+    }
+    return geom;
   }
   if (family === "bracket") {
     const bL = getP(params, "baseLength", 120);
@@ -2843,10 +2872,6 @@ document.addEventListener("click", event => {
   if (action === "apply-parameters") applyParameterChanges();
   if (action === "connect-bridge") connectBridge();
   if (action === "send-model") sendToSolidWorks();
-  if (action === "simulate") runSimulation();
-  if (action === "optimize") optimizeModel();
-  if (action === "material") assessMaterial();
-  if (action === "run-agents") runAgents();
   if (action === "open-cloud") openCloudWorkspace();
   if (action === "show-cloud-frame") showCloudFrame();
   if (action === "show-local-preview") showLocalPreview();

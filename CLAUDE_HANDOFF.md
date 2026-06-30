@@ -1,388 +1,266 @@
-# Claude Handoff: SolidWorks AI CAD Studio
+# SolidWorks AI CAD Studio — Handoff
 
-## Project Snapshot
+**Repo:** `https://github.com/kabirspatel/solidworks-ai-cad-studio`  
+**Live URL:** `https://kabirspatel.github.io/solidworks-ai-cad-studio/`  
+**Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`
 
-Repo: `https://github.com/kabirspatel/solidworks-ai-cad-studio`
+---
 
-Live dashboard: `https://kabirspatel.github.io/solidworks-ai-cad-studio/`
+## What this app is
 
-Local path on Kabir's Mac:
+A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user describes a part (or picks a seed variant for bottles), adjusts sliders, AI generates parameters, and the result is either pushed to local SolidWorks via a VBA macro, previewed in an embedded 3D viewer, or exported as a CSV design table.
+
+**Platform:** pure static HTML/CSS/JS — no build step, no Node at runtime. Deploy = `git push`.
+
+---
+
+## File map
+
+```
+index.html          — single-page shell (4 panel sections)
+styles.css          — all styles
+app.js              — everything: state, renders, AI calls, SolidWorks bridge, 3D viewer
+
+bridge/
+  MacDevBridge/
+    server.mjs      — Node.js local bridge (run on Mac to test without SolidWorks)
+    README.md
+  CloudBroker/
+    server.mjs      — OAuth/push scaffold (not wired to real Dassault APIs yet)
+    README.md
+
+cad-server/
+  main.py           — FastAPI + numpy geometry server (generates real STL from params)
+  requirements.txt  — fastapi, uvicorn, numpy
+
+render.yaml         — Render.com free-tier deploy config for cad-server
+```
+
+---
+
+## What WORKS today
+
+### AI Copilot
+All three provider modes are wired and correct:
+
+| Mode | Endpoint | Key storage | Status |
+|------|----------|-------------|--------|
+| **Gemini** | `generativelanguage.googleapis.com/v1beta/.../gemini-2.0-flash` | `sessionStorage` | ✅ Working |
+| **Claude** | `api.anthropic.com/v1/messages` — model `claude-sonnet-4-6`, header `anthropic-dangerous-direct-browser-access: true` | `sessionStorage` | ✅ Working |
+| **OpenAI** | `api.openai.com/v1/chat/completions` — default model `gpt-4o-mini` | `sessionStorage` | ✅ Fixed (was using wrong /v1/responses endpoint) |
+
+> **Keys are session-only** — stored in `sessionStorage`, never `localStorage`, never sent to any server. They clear when the browser tab closes.
+
+How AI is used: user types a design intent prompt → copilot calls the selected AI → AI returns JSON → parameters populate the specs table.
+
+### Bottle parametric design (the main workflow)
+- 25 seed variants B01–B25, each with a concept + morph family assignment
+- 5 morph families for interpolation (e.g. "01→03: Minimal cylinder → Sculpted icon")
+- 15 parameter sliders (height, body diameter, depth, shoulder height, wall, rib count/depth, ring count/depth, facet count/depth, helix ridges/depth/turns, superellipse n)
+- Morph position slider linearly interpolates all numeric params between seed designs
+- All slider changes update the 3D viewer in real time (no full re-render)
+- State persists to `localStorage` under key `solidworks-ai-cad-studio-v4`
+
+### 3D viewer (Three.js r128)
+- OrbitControls — drag to rotate, scroll to zoom
+- Renders parametric geometry from the current parameters
+- Bottle: `LatheGeometry` with body radius, neck radius, shoulder height, neck height + oval squeeze when bodyDepth ≠ bodyDiameter
+- Bracket: `ExtrudeGeometry` L-shape
+- Tray/Enclosure/Assembly: `BoxGeometry`
+- If a geometry server URL is configured: fetches real STL via POST to `/api/generate`, falls back to parametric if server is unavailable
+
+### Push to SolidWorks (VBA macro)
+- "Push to SolidWorks" downloads a `.swb` macro file
+- In SolidWorks: **Tools → Macros → Run** → select the file
+- Macro uses `EquationMgr.Add2` to set global variables matching the parameter keys
+- SolidWorks dimension names use `swDimension` field (e.g. `D1@HEIGHT`)
+
+### Local SolidWorks bridge (MacDevBridge)
+- Run `node bridge/MacDevBridge/server.mjs` on your Mac
+- Default URL: `http://127.0.0.1:8787`
+- Type that URL in the "Local bridge" field and click "Connect bridge"
+- Implements `/api/simulate`, `/api/optimize`, `/api/material-assessment`, `/api/agents/run` — all return deterministic local estimates
+- Writes payloads to `bridge/MacDevBridge/runs/`
+
+### Standards & compliance
+- ~50 curated standards across bottle, enclosure, bracket, tray families
+- "Auto-match" infers applicable standards from prompt text + material
+- Checkboxes let user select active standards
+- Selected standards generate constraints (character limits, test requirements) that feed into the AI system prompt
+
+### Design table
+- "Export CSV" downloads a SolidWorks-compatible design table
+- All parameters with `swDimension` names, one configuration row per variant
+
+---
+
+## What is STUB / not real yet
+
+| Feature | Reality |
+|---------|---------|
+| FEA (Run simulation) | Local formula estimates only — bridge endpoints not connected to real SolidWorks Simulation |
+| Optimize | Local rule-based suggestions — no real optimization engine |
+| Material/LCA | Local lookup table — no real material database or LCA API |
+| Run agents | Local status strings — no real agent execution |
+| CloudBroker | OAuth scaffolding only — not connected to Dassault APIs |
+| Cloud CAD embed | Only shows iframe if user pastes a URL manually; no auth |
+| Image geometry extraction | Browser-side contour approximation from image files — not real photogrammetry |
+
+> The analysis buttons (FEA, Optimize, Material, Agents) were removed from the UI in the current version. Their results only appear in the Specs panel via the status strip if the MacDevBridge returns them.
+
+---
+
+## Geometry server (cad-server)
+
+A FastAPI/numpy server that generates actual STL binary for the 5 product families.
+
+**Run locally:**
+```sh
+cd cad-server
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+**Deploy to Render.com (free tier):**
+- `render.yaml` is already configured
+- Go to render.com → New Web Service → connect the repo
+- After deploy, paste the `https://xxx.onrender.com` URL into the "Geometry server" field in the dashboard
+- Free tier spins down after 15 min inactivity — first request takes ~30s
+
+**API:**
+```
+POST /api/generate
+  Body: { "family": "bottle|enclosure|bracket|tray|assembly", "parameters": [...] }
+  Returns: binary STL (Content-Type: application/octet-stream)
+
+GET /health
+  Returns: { "status": "ok" }
+```
+
+---
+
+## How to run locally
 
 ```sh
-/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
-```
-Latest known commit at handoff:
-
-```text
-dc6d17c Make cloud workflow online first
+cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
+python3 -m http.server 5174 --bind 127.0.0.1
+# Open http://127.0.0.1:5174
 ```
 
-The app began as a dashboard concept for AI-assisted SolidWorks CAD generation. It is now a static GitHub Pages dashboard with several integration scaffolds:
+No build step. Edit `app.js` or `styles.css`, reload the browser.
 
-- Online-first cloud workflow for 3DEXPERIENCE / SOLIDWORKS xDesign.
-- Optional Mac development bridge for local testing without SolidWorks.
-- Optional Windows SolidWorks bridge scaffold for desktop COM automation.
-- Optional Windows native host scaffold for embedding desktop SolidWorks beside the dashboard.
-- CloudBroker scaffold for future Dassault/3DEXPERIENCE OAuth and API calls.
+Bump `?v=N` in `index.html` after significant JS changes to force cache-bust on GitHub Pages.
 
-## User Goal
+---
 
-The user wants a shareable web dashboard where someone can log into their SOLIDWORKS account and work inside the dashboard without installing/running a local app.
-
-Important reality:
-
-- Desktop SOLIDWORKS cannot be embedded/controlled directly by a normal website.
-- A no-local-app workflow must use SOLIDWORKS cloud/3DEXPERIENCE apps such as xDesign, plus Dassault-approved OAuth/API access.
-- Vendor pages may block third-party iframe embedding. The dashboard can attempt an iframe, but must fall back to opening the official workspace in a secure tab.
-
-The product direction should be:
-
-1. Make the dashboard online-first.
-2. Use 3DEXPERIENCE/xDesign as the cloud CAD surface.
-3. Use a backend CloudBroker for OAuth, token exchange, access control, and model package push.
-4. Keep local bridges only as dev/Windows fallback paths.
-
-## Current UX
-
-The dashboard is intentionally four-pane:
-
-- AI copilot
-- Requirements intake
-- Model
-- Current model specs
-
-The Model panel includes:
-
-- `Online cloud mode`
-- `Open / log in`
-- `Show inside`
-- `Connect cloud`
-- `Push package`
-- `Show preview`
-- `Export cloud package`
-
-Current behavior:
-
-- `Open / log in` opens `https://my.3dexperience.3ds.com/` in a new tab by default.
-- `Show inside` attempts to load the cloud workspace in the model frame.
-- If 3DEXPERIENCE blocks iframe embedding, the user must use `Open / log in`.
-- `Push package` sends the current model package to `CloudBroker` if configured; otherwise it exports a JSON cloud package.
-
-## Key Files
-
-Dashboard:
-
-```text
-index.html
-styles.css
-app.js
-README.md
-package.json
-```
-
-Cloud account integration scaffold:
-
-```text
-bridge/CloudBroker/server.mjs
-bridge/CloudBroker/README.md
-```
-
-Mac local test bridge:
-
-```text
-bridge/MacDevBridge/server.mjs
-bridge/MacDevBridge/README.md
-```
-
-Windows SolidWorks desktop bridge:
-
-```text
-bridge/SolidWorksBridge/Program.cs
-bridge/SolidWorksBridge/SolidWorksBridge.csproj
-bridge/SolidWorksBridge/README.md
-```
-
-Windows native host for desktop SolidWorks embedding:
-
-```text
-bridge/SolidWorksNativeHost/
-```
-
-## Implemented Capabilities
-
-### Dashboard
-
-- Static GitHub Pages app.
-- AI copilot with three modes:
-  - browser OpenAI key
-  - AI endpoint
-  - local parser
-- Requirements text intake.
-- Requirement file upload.
-- Reference image upload.
-- Browser-side image contour extraction.
-- Transition matrix generation from multiple reference image profiles.
-- CSV/TSV/TXT/simple XLSX parameter import.
-- SolidWorks-style design table export.
-- Model parameter table with SolidWorks dimension names.
-- Local preview SVG.
-- Cloud package export.
-- Bridge payload export.
-- Local fallback simulation/optimization/material/LCA/agent outputs.
-
-### CloudBroker
-
-Current scaffold:
-
-- `GET /api/cloud/status`
-- `GET /api/cloud/auth/start`
-- `GET /api/cloud/auth/callback`
-- `POST /api/cloud/push`
-- Stores pushed cloud packages under `bridge/CloudBroker/runs/`.
-- Supports environment variables for future OAuth:
+## How to deploy
 
 ```sh
-THREEDS_AUTH_URL
-THREEDS_TOKEN_URL
-THREEDS_CLIENT_ID
-THREEDS_CLIENT_SECRET
-THREEDS_REDIRECT_URI
-THREEDS_SPACE_URL
-THREEDS_SCOPE
-```
-
-What it does not yet do:
-
-- It does not call real Dassault/3DEXPERIENCE APIs.
-- It does not create xDesign models.
-- It does not create files in a user's 3DEXPERIENCE tenant.
-- It only stores packages and provides OAuth scaffolding.
-
-### MacDevBridge
-
-Purpose:
-
-- Lets Kabir test the dashboard on a Mac without SolidWorks.
-- Serves the dashboard at `http://127.0.0.1:8787/`.
-- Implements the same bridge endpoints as the Windows bridge.
-- Writes design tables, payloads, operations, and summaries to `bridge/MacDevBridge/runs/`.
-
-Run:
-
-```sh
-node bridge/MacDevBridge/server.mjs
-```
-
-If `npm` is unavailable on Kabir's Mac, use bundled node:
-
-```sh
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node bridge/MacDevBridge/server.mjs
-```
-
-### Windows SolidWorksBridge
-
-Purpose:
-
-- Future real desktop SolidWorks automation through Windows COM.
-- Current implementation is a scaffold with deterministic local outputs.
-- It attempts late-bound COM access to `SldWorks.Application`.
-
-Run on Windows:
-
-```powershell
-cd bridge\SolidWorksBridge
-dotnet run --urls "https://localhost:8787"
-```
-
-### Windows SolidWorksNativeHost
-
-Purpose:
-
-- Native WPF app that reparents an Edge dashboard window and SolidWorks desktop window into one shell.
-- Only useful on Windows with installed/licensed SolidWorks.
-
-Run on Windows:
-
-```powershell
-cd bridge\SolidWorksNativeHost
-dotnet run
-```
-
-## Current Constraints / Truths To Preserve
-
-Do not claim:
-
-- that the static GitHub Pages dashboard can directly control a user's desktop SolidWorks.
-- that 3DEXPERIENCE/xDesign can definitely be embedded in an iframe.
-- that OAuth/account integration is finished.
-- that CAD generation into xDesign is live.
-
-Do claim:
-
-- the dashboard can prepare CAD payloads, design tables, operations, and cloud packages.
-- the cloud-account path requires Dassault/3DEXPERIENCE OAuth/API credentials.
-- the online workflow depends on the user's cloud SOLIDWORKS entitlement, likely xDesign or related 3DEXPERIENCE apps.
-- the CloudBroker is the right architectural location for account integration.
-
-## Recommended Next Build Steps
-
-### 1. Make CloudBroker production-shaped
-
-Add:
-
-- persistent session storage instead of in-memory `Map`
-- cookie/session management
-- secure OAuth state + PKCE
-- refresh token handling
-- per-user package history
-- hosted deployment target, likely Render/Fly.io/Railway/Vercel serverless if compatible
-
-Keep secrets server-side only.
-
-### 2. Confirm Dassault/3DEXPERIENCE API path
-
-The next human task is not coding. It is platform access:
-
-- Register a Dassault/3DEXPERIENCE developer/OAuth application.
-- Determine the correct auth/token URLs for the user's tenant.
-- Determine whether APIs can create/upload CAD files, xDesign-compatible geometry, or 3DXML/STEP-derived assets.
-- Confirm whether there is any supported embeddable viewer/editor URL.
-- Confirm what scopes are required.
-
-Without this, only package export and workspace launch are possible.
-
-### 3. Improve cloud package format
-
-Current package includes:
-
-- dashboard payload
-- design-table CSV
-- SolidWorks-ish operations
-- image contour profiles
-- transition matrix
-
-Next:
-
-- Add `manifest.json` with schema/version.
-- Add `parameters.csv`.
-- Add `requirements.md`.
-- Add `geometry-profiles.json`.
-- Add a neutral CAD exchange plan, probably STEP/3DXML once a real geometry engine exists.
-
-### 4. Add a real geometry service
-
-The dashboard currently infers parameters and creates operation plans; it does not generate actual CAD solids.
-
-Possible paths:
-
-- Use a server-side CAD kernel or scriptable modeler to generate STEP.
-- Use OpenCascade/CadQuery on a backend.
-- Use xDesign/3DEXPERIENCE APIs if available.
-- Use SolidWorks desktop automation only on Windows.
-
-Recommended near-term:
-
-- Add a Python CadQuery service for simple enclosures/brackets/trays.
-- Return STEP/STL previews and attach them to cloud packages.
-
-### 5. Add real AI backend
-
-Current browser can call OpenAI directly if key is entered, but production should use a backend.
-
-Implement in CloudBroker or a separate `AiBroker`:
-
-- `/api/copilot`
-- server-side `OPENAI_API_KEY`
-- JSON schema validation
-- revision history
-- model operation validation before push
-
-### 6. Replace local estimates with real analysis
-
-Current FEA/material/LCA are deterministic estimates.
-
-Future:
-
-- FEA: SolidWorks Simulation API on Windows, or cloud simulation API if available.
-- Material: real material database.
-- LCA: real data source or curated project-specific factors.
-
-## Commands
-
-Check JavaScript syntax with bundled Node:
-
-```sh
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check app.js
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check bridge/MacDevBridge/server.mjs
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check bridge/CloudBroker/server.mjs
-```
-
-Run Mac bridge:
-
-```sh
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node bridge/MacDevBridge/server.mjs
-```
-
-Run CloudBroker scaffold:
-
-```sh
-/Users/kabirpatel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node bridge/CloudBroker/server.mjs
-```
-
-Deploy:
-
-```sh
-git add .
-git commit -m "..."
+cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
+git add app.js index.html styles.css CLAUDE_HANDOFF.md
+git commit -m "describe change"
 git push origin main
 ```
 
-GitHub Pages deploys from `main`.
+GitHub Pages deploys from `main` automatically. Takes ~60 seconds.
 
-## Known User Pain Point
+---
 
-Kabir tried:
+## AI keys
 
-```sh
-npm run mac:dev
+Keys are entered in the AI Copilot panel and stored in `sessionStorage` only:
+
+| Provider | Key format | Where to get |
+|----------|-----------|--------------|
+| Gemini | `AIza…` | https://aistudio.google.com/app/apikey (free) |
+| Claude | `sk-ant-…` | https://console.anthropic.com |
+| OpenAI | `sk-…` | https://platform.openai.com/api-keys |
+
+Default models: `gemini-2.0-flash`, `claude-sonnet-4-6`, `gpt-4o-mini`
+
+---
+
+## State storage
+
+- `localStorage` key: `solidworks-ai-cad-studio-v4`
+- Contains: all parameters, requirements, AI settings, bridge URLs, geometry server URL, revision number, morph state, standards selections
+- API keys: `sessionStorage` only (3 separate keys)
+- Reset: click "Reset" in requirements panel, or clear `localStorage` in DevTools
+
+---
+
+## SolidWorks connectivity — honest summary
+
+| Path | Requires | Status |
+|------|----------|--------|
+| **VBA macro (.swb)** | SolidWorks installed (any platform) | ✅ Working — download and run via Tools → Macros |
+| **MacDevBridge** | Node.js on Mac | ✅ Working — local bridge, returns mock analysis |
+| **Windows SolidWorksBridge** | Windows + .NET + SolidWorks | Scaffold only — COM calls not tested |
+| **Direct browser embed** | Nothing | ✗ Impossible — browser cannot control desktop SolidWorks |
+| **3DEXPERIENCE/xDesign** | Dassault OAuth credentials | Scaffold only — no real API integration |
+
+The VBA macro path is the only currently functional SolidWorks integration. It is also the most practical for Georgia Tech student license users who have SolidWorks on Windows but work on Mac.
+
+---
+
+## Known issues / next steps
+
+### High priority
+1. **MCP server** (`bridge/McpServer/server.mjs`) — exists but never wired to the dashboard. This would allow Claude to call tools that push to SolidWorks directly during a Claude Code session. To activate: run the MCP server, configure it in Claude Code settings, then use it as a tool during prompting.
+
+2. **3D viewer doesn't show ribs/facets** — the `LatheGeometry` is a solid of revolution and can't represent surface features. The viewer shows overall proportions but not rib count, facet panels, or helix ridges. Fix options:
+   - Deploy the cad-server and configure it — it generates STL with actual geometry for the server-side path
+   - Or add a note/badge in the viewer overlay ("Surface features visible in SolidWorks only")
+
+3. **Bottle morph family interpolation uses seed data but ignores non-variant sliders** — if you manually edit a slider after loading a variant, then drag the morph slider, manual edits are overwritten. This is a UX issue.
+
+4. **Key persistence across renders** — if anything triggers a full `render()` while the user has typed a key but not yet clicked "Generate", the key field clears (it re-renders empty). User must type the key and immediately click Generate without doing anything else that triggers a re-render.
+
+### Medium priority
+5. **`cad-server/main.py` STL quality** — the bottle STL is a lathe revolution without surface features. Needs numpy or shapely-based rib/facet geometry.
+
+6. **Standards constraints not fed to VBA macro** — selected standards' constraints (character limits, test notes) appear in the specs panel but are not included in the `.swb` macro output.
+
+7. **Export JSON payload** includes analysis fields that are just local estimates — these could mislead a downstream consumer. Consider stripping `analysis` from the exported JSON or tagging fields as `"source": "local-estimate"`.
+
+### Nice to have
+8. **BOTTLE_LOCKS** constants in `app.js` (lines ~335) still reference specific material terms. These only appear in the bottle slider panel's "Locked norms" section — acceptable for now but should become configurable.
+
+9. **Image geometry extraction** (`handleImageUpload`) — browser-side canvas pixel analysis. Works as a rough contour capture but is not a real photogrammetry pipeline.
+
+---
+
+## App architecture in one paragraph
+
+`app.js` is a ~3000-line single-file app. State lives in a global `state` object (serialized to `localStorage`). `render()` re-draws all 4 panels by setting innerHTML. The 3D viewer (`mount3DViewer`) is mounted after each render via `requestAnimationFrame` and reuses the Three.js scene across renders via a module-level `_three` variable. Bottle sliders use live `input` events that update `state.parameters` and call `saveOnly()` (direct `localStorage.setItem`) without triggering a full re-render, keeping the viewport responsive during slider drag. AI calls flow through `askCopilot()` → `callOpenAI/callClaude/callGemini()` → `updateFromBlueprint()` → `persist()` → `render()`.
+
+---
+
+## Best continuation prompt
+
 ```
+You are continuing work on SolidWorks AI CAD Studio.
+Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
+GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
 
-and got:
+Read CLAUDE_HANDOFF.md first for full current state.
 
-```text
-zsh: command not found: npm
-```
+The app is a static HTML/CSS/JS dashboard — no build step.
+Run locally: python3 -m http.server 5174 (from the repo root)
+Deploy: git add app.js index.html styles.css && git commit && git push origin main
 
-This means Node/npm is not installed on the Mac PATH. Do not treat this as an app failure.
+Key files:
+- app.js: all logic (~3000 lines), one global `state` object
+- styles.css: all styles
+- cad-server/main.py: FastAPI geometry server (deploy to Render.com for real STL)
+- bridge/MacDevBridge/server.mjs: local Node bridge for SolidWorks simulation
 
-Options:
+What works: AI copilot (Gemini/Claude/OpenAI all wired), bottle parametric sliders,
+Three.js 3D preview, VBA macro push to SolidWorks, standards matching, CSV export.
 
-- Tell Kabir to install Node.js from `https://nodejs.org/`.
-- Use the bundled Codex Node path shown above.
-- Avoid local bridge entirely and use the hosted dashboard + cloud workflow.
+What doesn't: FEA/optimization/LCA are local estimates only. No real Dassault API.
+The VBA macro is the only real SolidWorks path.
 
-## Best Continuation Prompt For Claude
-
-```text
-You are continuing SolidWorks AI CAD Studio.
-
-Goal: make the app online-first so a user can sign into their SOLIDWORKS/3DEXPERIENCE account and use cloud CAD/xDesign from the dashboard without local SolidWorks.
-
-Do not claim browser-only GitHub Pages can directly control desktop SolidWorks. Use CloudBroker for OAuth/API integration and preserve honest iframe fallback behavior because 3DEXPERIENCE may block embedding.
-
-Start by reading:
-- README.md
-- app.js
-- bridge/CloudBroker/server.mjs
-- bridge/CloudBroker/README.md
-- bridge/MacDevBridge/server.mjs
-
-Current latest commit: dc6d17c Make cloud workflow online first.
-
-Next tasks:
-1. Productionize CloudBroker OAuth flow with PKCE/session persistence.
-2. Add a real package manifest format for cloud CAD handoff.
-3. Add a server-side AI endpoint so browser keys are not needed.
-4. Add a CadQuery/OpenCascade geometry service to generate STEP/STL from dashboard parameters.
-5. Integrate with real Dassault/3DEXPERIENCE APIs once credentials/scopes are available.
+Current JS version tag in index.html: v=10
+Bump this after each significant change to force cache bust on GitHub Pages.
 ```
