@@ -468,6 +468,10 @@ function createDefaultState() {
       matched: [],
       selected: [],
       note: ""
+    },
+    cadServer: {
+      url: "",
+      status: "Not configured"
     }
   };
 }
@@ -511,7 +515,8 @@ function normalizeState(saved) {
       ...(saved.standards || {}),
       matched: Array.isArray(saved.standards?.matched) ? saved.standards.matched : defaults.standards.matched,
       selected: Array.isArray(saved.standards?.selected) ? saved.standards.selected : defaults.standards.selected
-    }
+    },
+    cadServer: { ...defaults.cadServer, ...(saved.cadServer || {}) }
   };
 }
 
@@ -1194,13 +1199,23 @@ function syncDraftFromDom() {
   if (prompt) state.prompt = prompt.value.trim();
   if (requirements) state.requirementText = requirements.value.trim();
   if (template) state.selectedTemplate = template.value;
-  if (aiMode) state.ai.mode = aiMode.value;
-  if (aiModel) state.ai.model = aiModel.value.trim() || DEFAULT_MODEL;
+  if (aiMode) {
+    const newMode = aiMode.value;
+    if (newMode !== state.ai.mode) {
+      const modeDefaults = { gemini: "gemini-2.0-flash", claude: "claude-sonnet-4-6", openai: "gpt-4o", bridge: "", parser: "" };
+      state.ai.model = modeDefaults[newMode] || "";
+      if (aiModel) aiModel.value = state.ai.model;
+    }
+    state.ai.mode = newMode;
+  }
+  if (aiModel) state.ai.model = aiModel.value.trim() || state.ai.model;
   if (aiEndpoint) state.ai.endpoint = aiEndpoint.value.trim();
   if (aiKey && aiKey.value.trim()) sessionStorage.setItem(SESSION_AI_KEY, aiKey.value.trim());
   if (claudeKey && claudeKey.value.trim()) sessionStorage.setItem(SESSION_CLAUDE_KEY, claudeKey.value.trim());
   const geminiKey = document.getElementById("geminiKey");
   if (geminiKey && geminiKey.value.trim()) sessionStorage.setItem(SESSION_GEMINI_KEY, geminiKey.value.trim());
+  const cadServerUrl = document.getElementById("cadServerUrl");
+  if (cadServerUrl) state.cadServer.url = cadServerUrl.value.trim();
   if (bridgeUrl) state.bridge.url = bridgeUrl.value.trim();
   if (cloudBrokerUrl) state.cloud.brokerUrl = cloudBrokerUrl.value.trim();
   if (cloudSpaceUrl) {
@@ -2281,41 +2296,35 @@ function renderModel() {
       </div>
       <div class="cloud-panel">
         <div>
-          <label>Online cloud mode</label>
-          <strong>${escapeHtml(state.cloud.provider)}</strong>
-          <p>${escapeHtml(state.cloud.lastMessage)}</p>
+          <label>Browser CAD <span style="font-size:11px;font-weight:400;color:var(--quiet)">— embed Onshape, xDesign, or any cloud CAD URL</span></label>
         </div>
         <div class="field-row">
           <div>
-            <label for="cloudSpaceUrl">3DEXPERIENCE workspace URL</label>
-            <input id="cloudSpaceUrl" value="${escapeHtml(state.cloud.spaceUrl)}" placeholder="https://my.3dexperience.3ds.com/">
+            <label for="cloudSpaceUrl">Cloud CAD URL <a href="https://cad.onshape.com" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">Onshape (free) ↗</a></label>
+            <input id="cloudSpaceUrl" value="${escapeHtml(state.cloud.spaceUrl === "https://my.3dexperience.3ds.com/" ? "" : state.cloud.spaceUrl)}" placeholder="https://cad.onshape.com/documents/…">
           </div>
           <div>
-            <label for="cloudBrokerUrl">Cloud broker URL</label>
-            <input id="cloudBrokerUrl" value="${escapeHtml(state.cloud.brokerUrl)}" placeholder="https://your-cloud-broker.example.com">
+            <label for="cadServerUrl">Geometry server URL <span style="font-size:11px;color:var(--quiet)">for real 3D mesh</span></label>
+            <input id="cadServerUrl" value="${escapeHtml(state.cadServer?.url || "")}" placeholder="https://your-service.onrender.com">
           </div>
         </div>
         <div class="button-row">
-          <button class="button primary" data-action="open-cloud">Open / log in</button>
-          <button class="button secondary" data-action="show-cloud-frame">Show inside</button>
-          <button class="button secondary" data-action="connect-cloud" ${loadingAction === "connect-cloud" ? "disabled" : ""}>Connect cloud</button>
-          <button class="button secondary" data-action="push-cloud" ${loadingAction === "push-cloud" ? "disabled" : ""}>Push package</button>
-          <button class="button ghost" data-action="show-local-preview">Show preview</button>
-          <button class="button ghost" data-action="export-cloud-package">Export cloud package</button>
+          <button class="button primary" data-action="show-cloud-frame">Show in window</button>
+          <button class="button ghost" data-action="open-cloud">Open in new tab</button>
+          <button class="button ghost" data-action="show-local-preview">3D preview</button>
         </div>
+        ${state.cadServer?.url ? `<p style="font-size:11px;color:var(--quiet);margin:4px 0 0">Geometry server: ${escapeHtml(state.cadServer.status || "ready")}</p>` : `<p style="font-size:11px;color:var(--quiet);margin:4px 0 0">No geometry server — deploy <code>cad-server/</code> to Render.com for real parametric STL.</p>`}
       </div>
       <div class="model-frame">
         <div class="model-bar">
-          <span>${escapeHtml(showCloud ? "3DEXPERIENCE / xDesign workspace" : state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
-          <span>${escapeHtml(showCloud ? "SOLIDWORKS account" : state.concept.material)}</span>
+          <span>${escapeHtml(showCloud ? (state.cloud.spaceUrl || "Cloud CAD") : state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
+          <span>${escapeHtml(state.concept.material || "")}</span>
         </div>
         <div class="model-embed">
-          ${showCloud ? `
-            <iframe title="3DEXPERIENCE cloud workspace" src="${escapeHtml(cloudViewer)}"></iframe>
-            <div class="embed-note">
-              Some SOLIDWORKS/3DEXPERIENCE pages block third-party iframe embedding. If this area refuses to load, use <button class="link-button" data-action="open-cloud">Open / log in</button>.
-            </div>
-          ` : showBridge ? `<iframe title="Embedded SolidWorks bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
+          ${showCloud && cloudViewer ? `
+            <iframe title="Cloud CAD workspace" src="${escapeHtml(cloudViewer)}" allow="fullscreen"></iframe>
+            <div class="embed-note">If the CAD app blocks iframe embedding, use "Open in new tab" instead.</div>
+          ` : showBridge ? `<iframe title="Bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
             <div class="preview-stage" id="threeViewport"></div>
           `}
         </div>
@@ -2518,23 +2527,15 @@ function build3DGeometry(family, params) {
   return new THREE.BoxGeometry(L || 120, H || 42, W || 80);
 }
 
-function mount3DViewer() {
-  const container = document.getElementById("threeViewport");
-  if (!container) return;
-  disposeThree();
-  if (typeof THREE === "undefined") {
-    container.innerHTML = `<p style="color:#6b8a7a;padding:24px;font-size:13px">Three.js not loaded — check network.</p>`;
-    return;
-  }
-
+function setupThreeScene(container) {
   const W = container.clientWidth  || 500;
   const H = container.clientHeight || 420;
 
-  const scene    = new THREE.Scene();
+  const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a2420);
-  scene.fog = new THREE.Fog(0x1a2420, 600, 1200);
+  scene.fog = new THREE.Fog(0x1a2420, 800, 1600);
 
-  const camera = new THREE.PerspectiveCamera(42, W / H, 0.5, 2000);
+  const camera = new THREE.PerspectiveCamera(42, W / H, 0.5, 3000);
   camera.position.set(0, 140, 340);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -2543,46 +2544,21 @@ function mount3DViewer() {
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
 
-  // Lights
   scene.add(new THREE.AmbientLight(0xaaccbb, 0.55));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(120, 220, 140);
   sun.castShadow = true;
   scene.add(sun);
-  scene.add(Object.assign(new THREE.DirectionalLight(0x5599ff, 0.25), { position: { x: -100, y: 60, z: -120, set() {} } }));
   const fill = new THREE.DirectionalLight(0x5599ff, 0.25);
   fill.position.set(-100, 60, -120);
   scene.add(fill);
 
-  // Ground grid
-  const grid = new THREE.GridHelper(600, 24, 0x2d4038, 0x232e28);
-  grid.position.y = 0;
+  const grid = new THREE.GridHelper(800, 32, 0x2d4038, 0x232e28);
   scene.add(grid);
-
-  // Geometry
-  const geom = build3DGeometry(state.concept.family, state.parameters);
-  geom.computeBoundingBox();
-  const box = geom.boundingBox;
-  const midY = (box.max.y + box.min.y) / 2;
-  const minY = box.min.y;
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x4a9e7c, roughness: 0.28, metalness: 0.12, side: THREE.DoubleSide
-  });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.castShadow = true;
-  mesh.position.y = -minY;
-  scene.add(mesh);
-
-  const edges = new THREE.EdgesGeometry(geom);
-  const wire  = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x7dd4ac, transparent: true, opacity: 0.22 }));
-  wire.position.y = -minY;
-  scene.add(wire);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor  = 0.07;
-  controls.target.set(0, (midY - minY) * 0.9, 0);
+  controls.dampingFactor = 0.07;
   controls.update();
 
   let animId;
@@ -2602,7 +2578,92 @@ function mount3DViewer() {
   });
   resizeObs.observe(container);
 
-  _three = { renderer, animId, resizeObs };
+  _three = { renderer, animId, resizeObs, scene, camera, controls };
+  return _three;
+}
+
+function addMeshToScene(geom, ctx) {
+  const { scene, controls } = ctx;
+  // remove old meshes
+  const old = scene.getObjectByName("cadMesh");
+  const oldW = scene.getObjectByName("cadWire");
+  if (old) scene.remove(old);
+  if (oldW) scene.remove(oldW);
+
+  geom.computeBoundingBox();
+  const box = new THREE.Box3();
+  box.copy(geom.boundingBox);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x4a9e7c, roughness: 0.28, metalness: 0.12, side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.name = "cadMesh";
+  mesh.castShadow = true;
+  mesh.position.set(-center.x, -box.min.y, -center.z);
+  scene.add(mesh);
+
+  const edges = new THREE.EdgesGeometry(geom);
+  const wire = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x7dd4ac, transparent: true, opacity: 0.20 }));
+  wire.name = "cadWire";
+  wire.position.copy(mesh.position);
+  scene.add(wire);
+
+  const camDist = maxDim * 1.8;
+  ctx.camera.position.set(camDist * 0.6, camDist * 0.7, camDist);
+  controls.target.set(0, size.y * 0.4, 0);
+  controls.update();
+}
+
+function mount3DViewer() {
+  const container = document.getElementById("threeViewport");
+  if (!container) return;
+  if (typeof THREE === "undefined") {
+    container.innerHTML = `<p style="color:#6b8a7a;padding:24px;font-size:13px">Three.js not loaded.</p>`;
+    return;
+  }
+
+  // Reuse existing scene if already mounted in this container
+  if (!_three || !container.contains(_three.renderer.domElement)) {
+    disposeThree();
+    setupThreeScene(container);
+  }
+
+  const serverUrl = state.cadServer?.url?.trim();
+
+  if (serverUrl && state.parameters.length) {
+    // ── fetch real STL from geometry server ──
+    container.style.cursor = "wait";
+    fetch(`${serverUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ family: state.concept.family, parameters: state.parameters })
+    })
+      .then(r => { if (!r.ok) throw new Error(`Server ${r.status}`); return r.arrayBuffer(); })
+      .then(buf => {
+        const loader = new THREE.STLLoader();
+        const geom = loader.parse(buf);
+        addMeshToScene(geom, _three);
+        container.style.cursor = "";
+        state.cadServer.status = "Loaded";
+      })
+      .catch(err => {
+        container.style.cursor = "";
+        state.cadServer.status = `Error: ${err.message}`;
+        // Fall back to parametric geometry
+        addMeshToScene(build3DGeometry(state.concept.family, state.parameters), _three);
+      });
+  } else {
+    // ── parametric fallback (no server configured) ──
+    if (state.parameters.length || state.concept.family) {
+      addMeshToScene(build3DGeometry(state.concept.family, state.parameters), _three);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2660,7 +2721,7 @@ document.addEventListener("change", event => {
     }
     persist();
   }
-  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl"].includes(event.target.id)) {
+  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl", "cadServerUrl"].includes(event.target.id)) {
     syncDraftFromDom();
     persist();
   }
