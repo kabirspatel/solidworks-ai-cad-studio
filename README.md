@@ -9,6 +9,21 @@ A focused dashboard for four jobs:
 
 The GitHub Pages app is static, so it cannot contain private server secrets or directly host a native SolidWorks desktop process. It now exposes connector points for AI, image-to-geometry, spreadsheet/design-table handoff, SolidWorks automation, FEA feedback, material/LCA checks, and multi-agent review.
 
+## Online-first workflow
+
+Use the hosted dashboard when you do not want a local app:
+
+[https://kabirspatel.github.io/solidworks-ai-cad-studio/](https://kabirspatel.github.io/solidworks-ai-cad-studio/)
+
+In the `Model` panel, use `Online cloud mode`:
+
+- `Open / log in`: opens the user's 3DEXPERIENCE workspace so they can sign in with their SOLIDWORKS account.
+- `Show inside`: attempts to display the workspace inside the dashboard.
+- `Push package`: sends the current CAD package to a configured cloud broker.
+- `Export cloud package`: downloads a handoff package if no broker is configured.
+
+Important: some 3DEXPERIENCE/SOLIDWORKS pages may block iframe embedding for security. In that case the dashboard can still open the cloud workspace in a secure tab and push/export model packages, but the vendor page cannot be forced into an iframe by our app.
+
 ## Open locally
 
 ```sh
@@ -20,7 +35,7 @@ Then open [http://localhost:8080](http://localhost:8080).
 
 ## Mac development mode
 
-On a MacBook, use the local Mac bridge instead of the Windows SolidWorks bridge:
+Mac development mode is optional. Use it only if you want to run the local test bridge instead of the online workflow:
 
 ```sh
 cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio

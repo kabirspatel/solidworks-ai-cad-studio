@@ -1,8 +1,8 @@
 const STORAGE_KEY = "solidworks-ai-cad-studio-v3";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const DEFAULT_MODEL = "gpt-5-mini";
-const DEFAULT_BRIDGE_URL = "http://127.0.0.1:8787";
-const DEFAULT_AI_ENDPOINT = "http://127.0.0.1:8787/api/copilot";
+const DEFAULT_BRIDGE_URL = "";
+const DEFAULT_AI_ENDPOINT = "";
 const DEFAULT_CLOUD_SPACE_URL = "https://my.3dexperience.3ds.com/";
 const DEFAULT_XDESIGN_INFO_URL = "https://www.solidworks.com/product/solidworks-xdesign";
 const DEFAULT_PROMPT = "Design a portable diagnostic enclosure for a point-of-care diagnostic device.";
@@ -149,19 +149,19 @@ function createDefaultState() {
     uploadedFiles: [],
     revision: 1,
     ai: {
-      mode: "bridge",
+      mode: "parser",
       model: DEFAULT_MODEL,
       endpoint: DEFAULT_AI_ENDPOINT,
-      status: "Mac bridge",
-      lastReply: "Start the MacDevBridge, then ask the copilot to generate or revise the model."
+      status: "Local parser",
+      lastReply: "Use the local parser, add an OpenAI key, or connect an AI endpoint to generate and revise the model."
     },
     bridge: {
       url: DEFAULT_BRIDGE_URL,
-      status: "Disconnected",
+      status: "Optional",
       embedUrl: "",
       activeDocument: blueprint.targetDoc,
       lastSync: "",
-      lastMessage: "No SolidWorks bridge connected"
+      lastMessage: "Local SolidWorks bridge is optional. Use cloud mode for browser-based CAD."
     },
     cloud: {
       provider: "3DEXPERIENCE / SOLIDWORKS xDesign",
@@ -169,9 +169,11 @@ function createDefaultState() {
       brokerUrl: "",
       spaceUrl: DEFAULT_CLOUD_SPACE_URL,
       launchUrl: DEFAULT_CLOUD_SPACE_URL,
+      embedUrl: "",
+      displayMode: "preview",
       infoUrl: DEFAULT_XDESIGN_INFO_URL,
       lastSync: "",
-      lastMessage: "Use cloud mode when you want browser-based CAD without local SolidWorks."
+      lastMessage: "Sign in to 3DEXPERIENCE/xDesign for browser-based CAD without local SolidWorks."
     },
     concept: blueprint.concept,
     requirements: blueprint.requirements,
@@ -206,9 +208,10 @@ function normalizeState(saved) {
   const savedBridge = { ...(saved.bridge || {}) };
   const savedCloud = { ...(saved.cloud || {}) };
   if (!savedAi.endpoint) savedAi.endpoint = defaults.ai.endpoint;
-  if (savedBridge.url === "https://localhost:8787") savedBridge.url = DEFAULT_BRIDGE_URL;
+  if (savedBridge.url === "https://localhost:8787") savedBridge.url = "http://127.0.0.1:8787";
   if (!savedCloud.spaceUrl) savedCloud.spaceUrl = defaults.cloud.spaceUrl;
   if (!savedCloud.launchUrl) savedCloud.launchUrl = savedCloud.spaceUrl;
+  if (!savedCloud.displayMode) savedCloud.displayMode = defaults.cloud.displayMode;
   return {
     ...defaults,
     ...saved,
@@ -1288,8 +1291,26 @@ function openCloudWorkspace() {
   const target = state.cloud.launchUrl || state.cloud.spaceUrl || DEFAULT_CLOUD_SPACE_URL;
   window.open(target, "_blank", "noopener,noreferrer");
   state.cloud.status = "Opened";
-  state.cloud.lastMessage = "Opened cloud workspace in a new tab. If your plan includes xDesign, launch it there.";
+  state.cloud.launchUrl = target;
+  state.cloud.lastMessage = "Opened cloud workspace in a secure tab. If your plan includes xDesign, launch it there.";
   persist("Cloud workspace opened");
+}
+
+function showCloudFrame() {
+  syncDraftFromDom();
+  const target = state.cloud.launchUrl || state.cloud.spaceUrl || DEFAULT_CLOUD_SPACE_URL;
+  state.cloud.embedUrl = target;
+  state.cloud.launchUrl = target;
+  state.cloud.displayMode = "cloud";
+  state.cloud.status = "Frame requested";
+  state.cloud.lastMessage = "Trying to show the cloud workspace inside the dashboard. If the provider blocks embedding, use Open / log in.";
+  persist("Cloud frame requested");
+}
+
+function showLocalPreview() {
+  state.cloud.displayMode = "preview";
+  state.cloud.lastMessage = "Showing dashboard preview. Use cloud mode to launch 3DEXPERIENCE/xDesign.";
+  persist("Preview shown");
 }
 
 function exportCloudPackage() {
@@ -1322,6 +1343,7 @@ async function connectCloud() {
     if (!response.ok) throw new Error(data.message || data.error || `Cloud broker returned ${response.status}`);
     state.cloud.status = data.connected ? "Connected" : "Broker online";
     state.cloud.launchUrl = data.launchUrl || data.spaceUrl || state.cloud.spaceUrl;
+    state.cloud.embedUrl = data.embedUrl || state.cloud.embedUrl;
     state.cloud.lastMessage = data.message || "Cloud broker is ready.";
     persist("Cloud broker connected");
   } catch (error) {
@@ -1501,9 +1523,9 @@ function renderHeader() {
   const aiStatus = document.getElementById("aiStatus");
   const bridgeStatus = document.getElementById("bridgeStatus");
   aiStatus.textContent = `AI: ${state.ai.status}`;
-  bridgeStatus.textContent = `SolidWorks: ${state.bridge.status}`;
+  bridgeStatus.textContent = `CAD: ${state.cloud.status || state.bridge.status}`;
   aiStatus.className = `status-pill ${statusClass(state.ai.status)}`;
-  bridgeStatus.className = `status-pill ${statusClass(state.bridge.status)}`;
+  bridgeStatus.className = `status-pill ${statusClass(state.cloud.status || state.bridge.status)}`;
 }
 
 function renderCopilot() {
@@ -1651,13 +1673,16 @@ function renderRequirements() {
 function renderModel() {
   const baseUrl = state.bridge.url ? normalizeBaseUrl(state.bridge.url) : "";
   const bridgeViewer = state.bridge.embedUrl || (baseUrl ? `${baseUrl}/viewer` : "");
+  const cloudViewer = state.cloud.embedUrl || state.cloud.launchUrl || state.cloud.spaceUrl;
+  const showCloud = state.cloud.displayMode === "cloud" && cloudViewer;
+  const showBridge = !showCloud && state.bridge.embedUrl;
   document.getElementById("modelPanel").innerHTML = `
     <div class="panel-header">
       <div>
         <span class="eyebrow">Model</span>
         <h2>SolidWorks window</h2>
       </div>
-      <span class="badge ${state.bridge.embedUrl ? "good" : "warn"}">${state.bridge.embedUrl ? "embedded" : "preview"}</span>
+      <span class="badge ${showCloud || showBridge ? "good" : "warn"}">${showCloud ? "cloud" : showBridge ? "bridge" : "preview"}</span>
     </div>
     <div class="panel-body fill-panel">
       <div class="model-tools">
@@ -1692,18 +1717,25 @@ function renderModel() {
         </div>
         <div class="button-row">
           <button class="button primary" data-action="open-cloud">Open / log in</button>
+          <button class="button secondary" data-action="show-cloud-frame">Show inside</button>
           <button class="button secondary" data-action="connect-cloud" ${loadingAction === "connect-cloud" ? "disabled" : ""}>Connect cloud</button>
           <button class="button secondary" data-action="push-cloud" ${loadingAction === "push-cloud" ? "disabled" : ""}>Push package</button>
+          <button class="button ghost" data-action="show-local-preview">Show preview</button>
           <button class="button ghost" data-action="export-cloud-package">Export cloud package</button>
         </div>
       </div>
       <div class="model-frame">
         <div class="model-bar">
-          <span>${escapeHtml(state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
-          <span>${escapeHtml(state.concept.material)}</span>
+          <span>${escapeHtml(showCloud ? "3DEXPERIENCE / xDesign workspace" : state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`)}</span>
+          <span>${escapeHtml(showCloud ? "SOLIDWORKS account" : state.concept.material)}</span>
         </div>
         <div class="model-embed">
-          ${state.bridge.embedUrl ? `<iframe title="Embedded SolidWorks bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
+          ${showCloud ? `
+            <iframe title="3DEXPERIENCE cloud workspace" src="${escapeHtml(cloudViewer)}"></iframe>
+            <div class="embed-note">
+              Some SOLIDWORKS/3DEXPERIENCE pages block third-party iframe embedding. If this area refuses to load, use <button class="link-button" data-action="open-cloud">Open / log in</button>.
+            </div>
+          ` : showBridge ? `<iframe title="Embedded SolidWorks bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
             <div class="preview-stage">${renderPreviewSvg()}</div>
           `}
         </div>
@@ -1868,6 +1900,8 @@ document.addEventListener("click", event => {
   if (action === "material") assessMaterial();
   if (action === "run-agents") runAgents();
   if (action === "open-cloud") openCloudWorkspace();
+  if (action === "show-cloud-frame") showCloudFrame();
+  if (action === "show-local-preview") showLocalPreview();
   if (action === "connect-cloud") connectCloud();
   if (action === "push-cloud") pushToCloud();
   if (action === "export-cloud-package") exportCloudPackage();

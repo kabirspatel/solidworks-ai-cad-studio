@@ -464,6 +464,31 @@ textarea {
   background: white;
 }
 
+.embed-note {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 10px 12px;
+  border: 1px solid rgba(36, 56, 61, .16);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: rgba(251, 252, 251, .94);
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 10px 24px rgba(36, 56, 61, .12);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  color: var(--ok);
+  background: transparent;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .preview-stage {
   display: grid;
   place-items: center;
