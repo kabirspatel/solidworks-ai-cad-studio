@@ -450,7 +450,7 @@ function createDefaultState() {
     },
     bridge: {
       url: DEFAULT_BRIDGE_URL,
-      status: "Optional",
+      status: "Not connected",
       embedUrl: "",
       activeDocument: "new-design.SLDPRT",
       lastSync: "",
@@ -1655,9 +1655,16 @@ async function askCopilot() {
     applyAiPayload(payload, "AI generated the current model.");
     persist("AI model updated");
   } catch (error) {
+    const raw = error.message || "AI request failed";
+    const firstLine = raw.split(/[\n*]/).map(s => s.trim()).find(Boolean) || raw;
+    const brief = firstLine.length > 200 ? firstLine.slice(0, 200) + "…" : firstLine;
+    const isQuota = /quota|rate.limit|billing/i.test(raw);
+    const hint = isQuota
+      ? " (Quota exceeded — switch to OpenAI or Claude in the AI Provider dropdown.)"
+      : "";
     state.ai.status = "AI error";
-    state.ai.lastReply = error.message;
-    persist(error.message);
+    state.ai.lastReply = brief + hint;
+    persist("AI error");
   } finally {
     loadingAction = "";
     render();
@@ -2196,7 +2203,7 @@ function renderCopilot() {
             ${loadingAction === "ask-ai" ? "Generating…" : "Generate with AI"}
           </button>
         </div>
-        ${state.ai.lastReply ? `<div class="ai-output">${escapeHtml(state.ai.lastReply)}</div>` : ""}
+        ${state.ai.lastReply ? `<div class="ai-output${state.ai.status === "AI error" ? " ai-output-error" : ""}">${escapeHtml(state.ai.lastReply)}</div>` : ""}
       </div>
     </div>
   `;
@@ -2293,26 +2300,23 @@ function renderBottleSliders() {
 
   return `
     <div class="bsl-panel">
-      <div class="bsl-row">
-        <label class="bsl-label">
-          <span>Morph family</span>
-          <span class="bsl-val" id="bslMorphFamLabel">${BOTTLE_MORPH_FAMILIES[curFam] || curFam}</span>
-        </label>
-        <select id="bslMorphFam" style="margin-top:4px">
-          ${morphFamilies.map(f => `<option value="${f}" ${f === curFam ? "selected" : ""}>${f} — ${BOTTLE_MORPH_FAMILIES[f] || f}</option>`).join("")}
+      <div class="bsl-row" style="border-bottom:none;padding-bottom:2px">
+        <label class="bsl-label" style="margin-bottom:3px">Design family</label>
+        <select id="bslMorphFam">
+          ${morphFamilies.map(f => `<option value="${f}" ${f === curFam ? "selected" : ""}>${BOTTLE_MORPH_FAMILIES[f] || f}</option>`).join("")}
         </select>
       </div>
-      <div class="bsl-row" style="margin-top:12px">
+      <div class="bsl-row">
         <label class="bsl-label">
           <span>Morph position</span>
           <span class="bsl-val" id="bslMorphPctLabel">${curPct}%</span>
         </label>
         <input type="range" id="bslMorphPct" min="0" max="100" step="1" value="${curPct}">
-        <p class="bsl-note">Drag to interpolate between the two seed designs in the selected family.</p>
+        <p class="bsl-note">Drag to blend between the two seed designs.</p>
       </div>
-      <div class="bsl-divider">Editable body parameters</div>
+      <div class="bsl-divider">Body parameters</div>
       ${sliderRows}
-      <div class="bsl-divider">Locked norms</div>
+      <div class="bsl-divider">Locked specs</div>
       <div class="bsl-locks">${lockRows}</div>
     </div>`;
 }
@@ -2326,15 +2330,10 @@ function renderRequirements() {
   document.getElementById("requirementsPanel").innerHTML = `
     <div class="panel-header">
       <div>
-        <span class="eyebrow">Requirements intake</span>
-        <h2>Brief, standards &amp; files</h2>
+        <span class="eyebrow">Design brief</span>
+        <h2>Requirements &amp; standards</h2>
       </div>
-      <div class="workflow-steps">
-        <div class="workflow-step ${state.prompt ? "done" : ""}"><span class="step-num">1</span><span>Input</span></div>
-        <div class="workflow-step ${matchedStandards.length ? "done" : ""}"><span class="step-num">2</span><span>Standards</span></div>
-        <div class="workflow-step ${state.parameters.length ? "done" : ""}"><span class="step-num">3</span><span>Parameters</span></div>
-        <div class="workflow-step ${state.bridge.status === "Synced" || state.cloud.status === "Synced" ? "done" : ""}"><span class="step-num">4</span><span>CAD</span></div>
-      </div>
+      ${state.parameters.length ? `<span class="badge good">${state.parameters.length} params</span>` : ""}
     </div>
     <div class="panel-body fill-panel">
       <div class="field-grid">
@@ -2457,11 +2456,11 @@ function renderModel() {
       <div class="model-tools">
         <div class="field-row">
           <div>
-            <label for="bridgeUrl">Local bridge <span style="font-size:10px;font-weight:400;color:var(--quiet)">run bridge/MacDevBridge/server.mjs, then connect</span></label>
+            <label for="bridgeUrl">Local bridge <span style="font-size:10px;font-weight:400;color:var(--quiet);text-transform:none;letter-spacing:0">run bridge/MacDevBridge/server.mjs, then connect</span></label>
             <input id="bridgeUrl" value="${escapeHtml(state.bridge.url)}" placeholder="http://127.0.0.1:8787">
           </div>
           <div>
-            <label for="cadServerUrl">Geometry server <span style="font-size:10px;font-weight:400;color:var(--quiet)">deploy cad-server/ to Render.com</span></label>
+            <label for="cadServerUrl">Geometry server <span style="font-size:10px;font-weight:400;color:var(--quiet);text-transform:none;letter-spacing:0">deploy cad-server/ to Render.com for real mesh</span></label>
             <input id="cadServerUrl" value="${escapeHtml(state.cadServer?.url || "")}" placeholder="https://your-cad-server.onrender.com">
           </div>
         </div>
@@ -2475,8 +2474,8 @@ function renderModel() {
 
       <div class="model-frame">
         <div class="model-bar">
-          <span>${escapeHtml(state.concept.material || "No material set")}</span>
-          <span>${escapeHtml(state.bridge.status)}</span>
+          <span>${escapeHtml(state.concept.family ? state.concept.familyLabel : "3D preview")}</span>
+          <span style="opacity:.7">${state.parameters.length ? `${state.parameters.length} parameters` : "No parameters yet"}</span>
         </div>
         <div class="model-embed">
           ${showCloud && cloudViewer ? `
@@ -2519,8 +2518,8 @@ function renderSpecs() {
   document.getElementById("specsPanel").innerHTML = `
     <div class="panel-header">
       <div>
-        <span class="eyebrow">Current model specs</span>
-        <h2>${escapeHtml(state.concept.familyLabel)} parameters</h2>
+        <span class="eyebrow">Parameters</span>
+        <h2>${escapeHtml(state.concept.title || "New design")}</h2>
       </div>
       <div class="button-row">
         <button class="button secondary" data-action="apply-parameters">Apply specs</button>
