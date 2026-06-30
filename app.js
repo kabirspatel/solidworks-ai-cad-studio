@@ -41,6 +41,271 @@ const MATERIAL_LIBRARY = {
   "Mixed materials": { process: "Assembly", feasibility: 66, lca: 48, notes: "Separability and end-of-life strategy need definition." }
 };
 
+const STANDARDS_LIBRARY = {
+  bottle: {
+    all: [
+      { id: "21 CFR 165.110", title: "Bottled water quality standards", category: "regulatory",
+        scope: "US bottled water labeling, source ID, quality limits",
+        labelRequired: "Water type; net quantity; manufacturer/packer/distributor address; lot/date code",
+        testRequired: "Contaminant analysis; microbiological testing per NSF/ANSI 60",
+        constraints: [
+          { param: "closure", rule: "Tamper-evident closure required — PLA/CPLA cap with linerless plug" },
+          { param: "neckDiameter", rule: "Standard tamper-evident finish recommended (28mm PCO-equivalent)" }
+        ]
+      },
+      { id: "FDA 21 CFR 101", title: "Food labeling general requirements", category: "labeling",
+        scope: "All packaged food-contact goods sold in the US",
+        labelRequired: "Statement of identity; net quantity (oz + mL); manufacturer/packer/distributor address; lot/date code",
+        testRequired: "Label compliance review before market launch",
+        constraints: [
+          { param: "labelArea", rule: "Label panel must accommodate statement of identity, net quantity, and full address block" }
+        ]
+      },
+      { id: "ASTM D2463", title: "Drop impact resistance of plastic bottles", category: "mechanical",
+        scope: "Plastic bottles up to 4L — drop impact qualification",
+        labelRequired: "None",
+        testRequired: "Drop from 1.8m (6ft) onto concrete; 6 specimens minimum; zero rupture pass criterion",
+        constraints: [
+          { param: "wall", rule: "min 0.65mm blow-molded PLA body wall; increase for H > 220mm" },
+          { param: "base", rule: "min 1.4mm base thickness to pass drop resistance" }
+        ]
+      },
+      { id: "California Prop 65", title: "Safe Drinking Water and Toxic Enforcement Act", category: "regulatory",
+        scope: "California — chemical exposure warnings required above threshold levels",
+        labelRequired: "Warning label if any listed chemical exceeds threshold (BPA, phthalates common triggers)",
+        testRequired: "Leachability testing for SVHC substances in contact with contents",
+        constraints: [
+          { param: "material", rule: "Ensure PLA resin and enzyme additive have no Prop 65-listed chemicals above threshold" }
+        ]
+      }
+    ],
+    PLA: [
+      { id: "ASTM D6400", title: "Standard specification for compostable plastics", category: "sustainability",
+        scope: "Plastics designed for aerobic composting in industrial or municipal facilities",
+        labelRequired: "BPI or equivalent compostability certification mark; RIC 7 PLA symbol",
+        testRequired: "CO₂ evolution per ISO 14855; disintegration per ISO 16929; ecotoxicity; heavy metals analysis",
+        constraints: [
+          { param: "material", rule: "Must use certified PLA resin with compostability test data on file" }
+        ]
+      },
+      { id: "EN 13432", title: "Packaging recoverable through composting (EU)", category: "sustainability",
+        scope: "European compostable packaging — required for EU eco-label and seedling logo",
+        labelRequired: "Seedling logo if certified by DIN CERTCO or TÜV Austria",
+        testRequired: "Biodegradation per ISO 14855; disintegration per EN 14045; ecotoxicity",
+        constraints: [
+          { param: "material", rule: "Both PLA base resin and all additives must independently pass EN 13432 testing" }
+        ]
+      },
+      { id: "FDA FCN 000178", title: "FDA food contact notification — polylactic acid", category: "food-contact",
+        scope: "PLA polymers for food-contact use (NatureWorks Ingeo and equivalents)",
+        labelRequired: "None additional",
+        testRequired: "Migration testing with food simulants per FDA guidance; AA (acetaldehyde) level < 10µg/L",
+        constraints: [
+          { param: "material", rule: "Use NatureWorks Ingeo or equivalent PLA with active FDA FCN or GRAS status" },
+          { param: "temperature", rule: "Max use temp ~40°C for cold-fill PLA food contact; not suitable for hot-fill" }
+        ]
+      }
+    ],
+    "PLA + enzyme additive system": [
+      { id: "ASTM D6400", title: "Standard specification for compostable plastics", category: "sustainability",
+        scope: "Plastics designed for aerobic composting in industrial or municipal facilities",
+        labelRequired: "BPI or equivalent compostability certification mark; RIC 7 PLA symbol",
+        testRequired: "CO₂ evolution per ISO 14855; disintegration per ISO 16929; ecotoxicity",
+        constraints: [
+          { param: "material", rule: "Both PLA base resin and enzyme additive package must independently pass compostability testing" }
+        ]
+      },
+      { id: "EN 13432", title: "Packaging recoverable through composting (EU)", category: "sustainability",
+        scope: "European compostable packaging",
+        labelRequired: "Seedling logo if certified by DIN CERTCO or TÜV Austria",
+        testRequired: "Biodegradation + disintegration + ecotoxicity — enzyme additive tested as part of formulation",
+        constraints: [
+          { param: "additive", rule: "Enzyme additive package must be declared and tested as part of the finished article" }
+        ]
+      },
+      { id: "FDA FCN 000178", title: "FDA food contact notification — PLA polymers", category: "food-contact",
+        scope: "PLA for food-contact use",
+        labelRequired: "None additional",
+        testRequired: "Migration testing with food simulants; confirm enzyme additive is GRAS or FCN-listed separately",
+        constraints: [
+          { param: "additive", rule: "Enzyme additive must have separate FDA FCN or GRAS determination for food contact" }
+        ]
+      }
+    ],
+    PET: [
+      { id: "FDA 21 CFR 177.1630", title: "Polyethylene terephthalate resins for food contact", category: "food-contact",
+        scope: "PET resins for direct food contact — beverage and water bottles",
+        labelRequired: "RIC 1 (PETE/PET) symbol",
+        testRequired: "Overall migration < 60mg/kg food simulant; AA level < 5µg/L for water",
+        constraints: [
+          { param: "material", rule: "PET intrinsic viscosity ≥ 0.72 dL/g for blow-molded bottles" }
+        ]
+      },
+      { id: "ISBT 301", title: "28mm PCO 1881 neck finish standard", category: "manufacturing",
+        scope: "Industry-standard 28mm neck finish for PET water and beverage bottles",
+        labelRequired: "None",
+        testRequired: "Neck finish gauging per ISBT 301 dimensional drawings",
+        constraints: [
+          { param: "neckDiameter", rule: "28mm PCO 1881 finish: T-dimension 34.925±0.15mm" },
+          { param: "threadPitch", rule: "3.175mm pitch for standard PCO 1881 finish" }
+        ]
+      }
+    ],
+    PETG: [
+      { id: "FDA 21 CFR 177.1315", title: "Copolymers of ethylene for food contact (PETG family)", category: "food-contact",
+        scope: "PETG and copolyester materials for food packaging",
+        labelRequired: "Material declaration if required by regional regulation",
+        testRequired: "Migration testing per FDA guidance; simulate worst-case food contact conditions",
+        constraints: []
+      }
+    ]
+  },
+  enclosure: {
+    all: [
+      { id: "IEC 60529", title: "Degrees of protection by enclosures (IP Code)", category: "mechanical",
+        scope: "Solid and liquid ingress protection rating system",
+        labelRequired: "IP rating marking on enclosure exterior",
+        testRequired: "IP5X: dust-limited; IP6X: dust-tight; IPX4: splash proof; IPX7: 1m immersion 30min",
+        constraints: [
+          { param: "wall", rule: "min 2.5mm for IP54 rating in PC-ABS injection-molded enclosure" }
+        ]
+      },
+      { id: "UL 94", title: "Tests for flammability of plastic materials", category: "safety",
+        scope: "Flammability classification V-0 / V-1 / V-2 / HB for enclosure materials",
+        labelRequired: "UL 94 flame class marking on enclosure or rating plate",
+        testRequired: "Vertical burn test per UL 94; evaluate self-extinguishing time and drip behavior",
+        constraints: [
+          { param: "material", rule: "V-0 rated PC-ABS required for electronic enclosures near ignition sources" },
+          { param: "wall", rule: "min 2.3mm for V-0 classification in standard PC-ABS grade" }
+        ]
+      },
+      { id: "RoHS 2011/65/EU", title: "Restriction of hazardous substances in electrical equipment", category: "chemical",
+        scope: "Electronic equipment sold in EU — restricted substances limits",
+        labelRequired: "CE marking (RoHS compliance part of CE declaration)",
+        testRequired: "Pb, Hg, Cd, Cr⁶⁺, PBB, PBDE below threshold in all homogeneous materials",
+        constraints: [
+          { param: "material", rule: "Use RoHS-compliant PC-ABS grade; verify colorant, stabilizer, and flame-retardant package" }
+        ]
+      },
+      { id: "REACH Reg EC 1907/2006", title: "Registration, Evaluation, Authorisation of Chemicals", category: "chemical",
+        scope: "EU chemical regulation — SVHC substance disclosure in articles ≥ 0.1% w/w",
+        labelRequired: "SVHC content disclosure on request; supply-chain communication required",
+        testRequired: "SVHC content testing; supplier declarations for all materials",
+        constraints: [
+          { param: "material", rule: "Request SVHC declaration from resin supplier; maintain on file" }
+        ]
+      }
+    ],
+    "Medical-grade PC-ABS": [
+      { id: "ISO 13485:2016", title: "Medical devices — quality management systems", category: "quality",
+        scope: "QMS requirements for medical device manufacturers and suppliers",
+        labelRequired: "CE marking (EU MDR) or FDA 510(k) / De Novo clearance",
+        testRequired: "Design V&V per documented procedures; risk management per ISO 14971",
+        constraints: [
+          { param: "cornerRadius", rule: "min 2mm internal radii for cleanability and stress reduction in molded enclosures" }
+        ]
+      },
+      { id: "ISO 10993-1", title: "Biological evaluation of medical devices", category: "biocompatibility",
+        scope: "Biocompatibility testing framework for patient-contact materials",
+        labelRequired: "Biocompatibility summary in device technical file",
+        testRequired: "Cytotoxicity (ISO 10993-5); sensitization (ISO 10993-10); genotoxicity if implant contact",
+        constraints: [
+          { param: "material", rule: "Medical-grade PC-ABS must have USP Class VI or ISO 10993 biocompatibility data" }
+        ]
+      },
+      { id: "IEC 60601-1", title: "Medical electrical equipment — general safety requirements", category: "safety",
+        scope: "Electrical medical devices — safety, EMC, and performance",
+        labelRequired: "CE marking with IEC 60601-1 test report; Notified Body involvement for class IIa+",
+        testRequired: "Dielectric strength; leakage current; mechanical robustness; EMC per CISPR 11",
+        constraints: [
+          { param: "wall", rule: "min 2.5mm for 2MOPP electrical isolation wall if located near mains voltage" }
+        ]
+      }
+    ]
+  },
+  bracket: {
+    all: [
+      { id: "ISO 2768-1", title: "General tolerances for linear and angular dimensions", category: "manufacturing",
+        scope: "Default dimensional tolerances for machined and formed parts when no individual tolerance is specified",
+        labelRequired: "Drawing callout: ISO 2768-m (medium) or ISO 2768-f (fine)",
+        testRequired: "CMM or gauge inspection per drawing callout",
+        constraints: [
+          { param: "holeDiameter", rule: "±0.1mm (medium class) for dimensions 3–30mm; ±0.2mm for 30–120mm" }
+        ]
+      },
+      { id: "ASME B18.3", title: "Socket head cap screws — dimensional standard", category: "manufacturing",
+        scope: "Fastener clearance hole and boss sizing for hex-socket cap screws",
+        labelRequired: "None",
+        testRequired: "Torque specification per installation procedure; pull-out load verification",
+        constraints: [
+          { param: "holeDiameter", rule: "Clearance holes: M4=4.5mm, M6=6.5mm, M8=8.5mm; boss height ≥ 1.5 × nominal diameter" }
+        ]
+      }
+    ],
+    "Aluminum 6061-T6": [
+      { id: "ASTM B221", title: "Aluminum-alloy extruded products — 6061-T6", category: "material",
+        scope: "6061-T6 extruded bars, rods, wire, and profiles",
+        labelRequired: "Material certificate of conformance",
+        testRequired: "Tensile strength ≥ 276 MPa; yield ≥ 241 MPa; elongation ≥ 10% per ASTM B221",
+        constraints: [
+          { param: "thickness", rule: "min 4mm for structural 6061-T6 bracket; minimum corner radius must equal or exceed end-mill radius" }
+        ]
+      }
+    ]
+  },
+  tray: {
+    all: [
+      { id: "ISO 11607-1", title: "Packaging for terminally sterilized medical devices", category: "regulatory",
+        scope: "Sterile barrier systems and protective packaging for medical trays",
+        labelRequired: "Sterilization process indicator; lot/date traceability on label",
+        testRequired: "Seal integrity; peel force consistency; bubble leak test; aging/stability",
+        constraints: [
+          { param: "wall", rule: "min 2.0mm for injection-molded sterile tray shell" },
+          { param: "draft", rule: "min 2° draft on all pocket walls for cleanroom demoulding and sterilant penetration" }
+        ]
+      }
+    ]
+  },
+  assembly: {
+    all: [
+      { id: "ISO 9001:2015", title: "Quality management systems — requirements", category: "quality",
+        scope: "General quality management system applicable to any product type",
+        labelRequired: "Quality declaration if ISO 9001 certified",
+        testRequired: "Incoming inspection; in-process checks; final functional test",
+        constraints: []
+      }
+    ]
+  }
+};
+
+const BOTTLE_VARIANTS = [
+  { id:"B01", concept:"Minimal cylinder",      morph:"01→03", H:232,  W:58.52, D:58.52, wall:0.65, base:1.4, neckOD:28, mouthID:21, shoulderH:26, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B02", concept:"Soft-shoulder cylinder", morph:"01→03", H:226,  W:60.33, D:60.33, wall:0.65, base:1.4, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B03", concept:"Rounded cylinder",       morph:"01→03", H:220,  W:61.65, D:61.65, wall:0.70, base:1.5, neckOD:28, mouthID:21, shoulderH:34, neckH:25, supN:2.3,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B04", concept:"Oval shoulder",          morph:"01→03", H:214,  W:67.50, D:55.80, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:38, neckH:25, supN:3.0,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B05", concept:"Sculpted flask",         morph:"01→03", H:205,  W:76.89, D:51.85, wall:0.80, base:1.8, neckOD:28, mouthID:21, shoulderH:42, neckH:26, supN:3.8,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:8,  facetDepth:0.80, helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B06", concept:"Micro-rib cylinder",     morph:"04→06", H:232,  W:59.65, D:59.65, wall:0.70, base:1.5, neckOD:28, mouthID:21, shoulderH:26, neckH:25, supN:2.0,  ribCount:48, ribDepth:0.45, ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B07", concept:"Ribbed soft shoulder",   morph:"04→06", H:228,  W:60.13, D:60.13, wall:0.70, base:1.5, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.05, ribCount:52, ribDepth:0.65, ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B08", concept:"Rib-facet hybrid",       morph:"04→06", H:220,  W:61.45, D:61.45, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:2.1,  ribCount:36, ribDepth:0.45, ringCount:0, ringDepth:0,    facetCount:14, facetDepth:0.55, helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B09", concept:"Crystal panel",          morph:"04→06", H:216,  W:62.10, D:62.10, wall:0.80, base:1.8, neckOD:28, mouthID:21, shoulderH:34, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:1.10, helixCount:10, helixDepth:0.25, helixTurns:0.7 },
+  { id:"B10", concept:"Horizontal ring",        morph:"04→06", H:202,  W:64.39, D:64.39, wall:0.70, base:1.7, neckOD:28, mouthID:21, shoulderH:22, neckH:24, supN:2.0,  ribCount:0,  ribDepth:0,    ringCount:9, ringDepth:1.05, facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B11", concept:"Lavender facet",         morph:"07→08", H:225,  W:64.11, D:54.68, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:3.0,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.90, helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B12", concept:"Facet-twist I",          morph:"07→08", H:224,  W:64.28, D:54.83, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:3.0,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.85, helixCount:10, helixDepth:0.25, helixTurns:0.7 },
+  { id:"B13", concept:"Spiral transition",      morph:"07→08", H:222,  W:66.09, D:57.21, wall:0.80, base:1.7, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:2.7,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.60, helixCount:10, helixDepth:0.60, helixTurns:1.1 },
+  { id:"B14", concept:"Spiral grip",            morph:"07→08", H:218,  W:62.44, D:62.44, wall:0.80, base:1.8, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.3,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:12, helixDepth:1.00, helixTurns:1.5 },
+  { id:"B15", concept:"Full spiral",            morph:"07→08", H:214,  W:63.06, D:63.06, wall:0.85, base:1.8, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:12, helixDepth:1.25, helixTurns:1.9 },
+  { id:"B16", concept:"Spiral start",           morph:"08→09", H:215,  W:62.88, D:62.88, wall:0.85, base:1.8, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:12, helixDepth:1.20, helixTurns:1.9 },
+  { id:"B17", concept:"Slim twirl",             morph:"08→09", H:218,  W:64.28, D:64.28, wall:0.80, base:1.7, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:2.15, ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:12, helixDepth:0.95, helixTurns:1.5 },
+  { id:"B18", concept:"Twirl-taper hybrid",     morph:"08→09", H:222,  W:75.45, D:67.07, wall:0.75, base:1.7, neckOD:28, mouthID:21, shoulderH:32, neckH:25, supN:2.4,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:10, helixDepth:0.55, helixTurns:1.0 },
+  { id:"B19", concept:"Smooth taper I",         morph:"08→09", H:226,  W:76.93, D:76.93, wall:0.70, base:1.6, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.15, ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B20", concept:"Iconic taper",           morph:"08→09", H:230,  W:75.48, D:75.48, wall:0.70, base:1.7, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B21", concept:"Purple facet base",      morph:"07→09", H:225,  W:64.11, D:54.68, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:30, neckH:25, supN:3.0,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.90, helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B22", concept:"Soft taper facet",       morph:"07→09", H:226,  W:72.10, D:63.36, wall:0.75, base:1.6, neckOD:28, mouthID:21, shoulderH:31, neckH:25, supN:2.8,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.65, helixCount:10, helixDepth:0.20, helixTurns:0.5 },
+  { id:"B23", concept:"Twist-taper",            morph:"07→09", H:222,  W:71.15, D:71.15, wall:0.80, base:1.7, neckOD:28, mouthID:21, shoulderH:31, neckH:25, supN:2.4,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:10, facetDepth:0.20, helixCount:10, helixDepth:0.65, helixTurns:1.1 },
+  { id:"B24", concept:"Tapered olive base",     morph:"07→09", H:228,  W:75.98, D:75.98, wall:0.70, base:1.6, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   },
+  { id:"B25", concept:"Final iconic taper",     morph:"07→09", H:230,  W:75.48, D:75.48, wall:0.70, base:1.7, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   }
+];
+
 const AGENT_LANES = [
   { key: "design", label: "Design", role: "Generate geometry options and feature logic." },
   { key: "standards", label: "Standards", role: "Check requirements, manufacturing rules, and constraints." },
@@ -198,7 +463,12 @@ function createDefaultState() {
       ...agent,
       status: "Waiting",
       result: "Ready to run"
-    }))
+    })),
+    standards: {
+      matched: [],
+      selected: [],
+      note: ""
+    }
   };
 }
 
@@ -235,7 +505,13 @@ function normalizeState(saved) {
       rows: Array.isArray(saved.designTable?.rows) ? saved.designTable.rows : defaults.designTable.rows
     },
     analysis: { ...defaults.analysis, ...(saved.analysis || {}) },
-    agents: Array.isArray(saved.agents) && saved.agents.length ? saved.agents : defaults.agents
+    agents: Array.isArray(saved.agents) && saved.agents.length ? saved.agents : defaults.agents,
+    standards: {
+      ...defaults.standards,
+      ...(saved.standards || {}),
+      matched: Array.isArray(saved.standards?.matched) ? saved.standards.matched : defaults.standards.matched,
+      selected: Array.isArray(saved.standards?.selected) ? saved.standards.selected : defaults.standards.selected
+    }
   };
 }
 
@@ -306,6 +582,29 @@ function getParameter(key, fallback = 0) {
 
 function materialRecord(material) {
   return MATERIAL_LIBRARY[material] || MATERIAL_LIBRARY[Object.keys(MATERIAL_LIBRARY).find(key => material?.includes(key))] || MATERIAL_LIBRARY["Mixed materials"];
+}
+
+function matchStandards(family, material) {
+  const bank = STANDARDS_LIBRARY[family] || {};
+  const byMaterial = bank[material] || [];
+  const defaults = bank.all || [];
+  const combined = [...defaults, ...byMaterial];
+  const seen = new Set();
+  return combined.filter(s => {
+    if (seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  });
+}
+
+function buildStandardsConstraints() {
+  const active = (state.standards?.matched || []).filter(s => (state.standards?.selected || []).includes(s.id));
+  return active.flatMap(s => s.constraints || []).map(c => `- ${c.param}: ${c.rule}`);
+}
+
+function buildStandardsLabelText() {
+  const active = (state.standards?.matched || []).filter(s => (state.standards?.selected || []).includes(s.id) && s.labelRequired);
+  return [...new Set(active.map(s => s.labelRequired))].join("; ");
 }
 
 function buildMaterialAssessment(material, parameters = []) {
@@ -932,7 +1231,13 @@ function makeCurrentModelPayload() {
     agents: state.agents,
     cloud: state.cloud,
     solidworksIntent: state.solidworksIntent,
-    targetDocument: state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`
+    targetDocument: state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`,
+    standards: {
+      matched: (state.standards?.matched || []).map(s => s.id),
+      selected: state.standards?.selected || [],
+      constraints: buildStandardsConstraints(),
+      labelRequired: buildStandardsLabelText()
+    }
   };
 }
 
@@ -955,7 +1260,78 @@ function generateModel() {
   const blueprint = buildModelBlueprint(state.prompt, state.requirementText, state.selectedTemplate);
   updateFromBlueprint(blueprint, "Requirements");
   state.ai.lastReply = `Generated ${blueprint.concept.familyLabel.toLowerCase()} model with ${blueprint.parameters.length} parameters.`;
-  persist("Model generated");
+  lookupStandards();
+}
+
+function lookupStandards() {
+  const family = state.concept?.family || inferFamily(`${state.prompt} ${state.requirementText}`, state.selectedTemplate);
+  const material = state.concept?.material || extractMaterial(`${state.prompt} ${state.requirementText}`, "");
+  const matched = matchStandards(family, material);
+  state.standards = state.standards || {};
+  state.standards.matched = matched;
+  if (!state.standards.selected || !state.standards.selected.length) {
+    state.standards.selected = matched.map(s => s.id);
+  } else {
+    const existingIds = new Set(state.standards.selected);
+    const newIds = matched.map(s => s.id);
+    state.standards.selected = [...new Set([...existingIds].filter(id => newIds.includes(id)))];
+    if (!state.standards.selected.length) state.standards.selected = newIds;
+  }
+  state.standards.note = matched.length
+    ? `${matched.length} standard${matched.length !== 1 ? "s" : ""} matched for ${family} / ${material || "any material"}`
+    : "No standards matched — try selecting a template or entering a material";
+  persist(matched.length ? `${matched.length} standards matched` : "No standards matched");
+}
+
+function loadBottleVariant(variantId) {
+  const variant = BOTTLE_VARIANTS.find(v => v.id === variantId);
+  if (!variant) { showToast("Variant not found"); return; }
+  const library = CAD_LIBRARY.bottle;
+  state.concept = {
+    family: "bottle",
+    familyLabel: library.label,
+    title: `${variant.id} — ${variant.concept}`,
+    material: "PLA + enzyme additive system",
+    features: [...library.features]
+  };
+  state.parameters = [
+    { key: "height",        label: "Height",         unit: "mm",    value: variant.H,           source: "Variant", swDimension: "D1@HEIGHT",        aliases: [] },
+    { key: "bodyDiameter",  label: "Body diameter",  unit: "mm",    value: variant.W,           source: "Variant", swDimension: "D2@BODY_DIAMETER", aliases: [] },
+    { key: "bodyDepth",     label: "Body depth",     unit: "mm",    value: variant.D,           source: "Variant", swDimension: "D3@BODY_DEPTH",    aliases: [] },
+    { key: "wall",          label: "Wall",           unit: "mm",    value: variant.wall,        source: "Variant", swDimension: "D4@WALL",          aliases: [] },
+    { key: "base",          label: "Base thickness", unit: "mm",    value: variant.base,        source: "Variant", swDimension: "D5@BASE",          aliases: [] },
+    { key: "neckDiameter",  label: "Neck OD",        unit: "mm",    value: variant.neckOD,      source: "Variant", swDimension: "D6@NECK_OD",       aliases: [] },
+    { key: "mouthDiameter", label: "Mouth ID",       unit: "mm",    value: variant.mouthID,     source: "Variant", swDimension: "D7@MOUTH_ID",      aliases: [] },
+    { key: "shoulderHeight",label: "Shoulder H",     unit: "mm",    value: variant.shoulderH,   source: "Variant", swDimension: "D8@SHOULDER_H",    aliases: [] },
+    { key: "neckHeight",    label: "Neck height",    unit: "mm",    value: variant.neckH,       source: "Variant", swDimension: "D9@NECK_H",        aliases: [] },
+    { key: "volume",        label: "Volume",         unit: "ml",    value: 500,                 source: "Standard",swDimension: "D10@VOLUME",       aliases: [] },
+    { key: "superellipseN", label: "Superellipse n", unit: "",      value: variant.supN,        source: "Variant", swDimension: "D11@SUPERELLIPSE_N",aliases: [] },
+    { key: "ribCount",      label: "Rib count",      unit: "count", value: variant.ribCount,    source: "Variant", swDimension: "D12@RIB_COUNT",    aliases: [] },
+    { key: "ribDepth",      label: "Rib depth",      unit: "mm",    value: variant.ribDepth,    source: "Variant", swDimension: "D13@RIB_DEPTH",    aliases: [] },
+    { key: "facetCount",    label: "Facet count",    unit: "count", value: variant.facetCount,  source: "Variant", swDimension: "D14@FACET_COUNT",  aliases: [] },
+    { key: "facetDepth",    label: "Facet depth",    unit: "mm",    value: variant.facetDepth,  source: "Variant", swDimension: "D15@FACET_DEPTH",  aliases: [] },
+    { key: "helixRidges",   label: "Helix ridges",   unit: "count", value: variant.helixCount,  source: "Variant", swDimension: "D16@HELIX_RIDGES", aliases: [] },
+    { key: "helixDepth",    label: "Helix depth",    unit: "mm",    value: variant.helixDepth,  source: "Variant", swDimension: "D17@HELIX_DEPTH",  aliases: [] },
+    { key: "helixTurns",    label: "Helix turns",    unit: "",      value: variant.helixTurns,  source: "Variant", swDimension: "D18@HELIX_TURNS",  aliases: [] }
+  ];
+  state.prompt = `Load STREAMS bottle variant ${variant.id}: ${variant.concept}`;
+  state.requirementText = [
+    `Project: STREAMS ${variant.id} — ${variant.concept}`,
+    `Morph step: ${variant.morph}`,
+    `Nominal fill volume: 500 mL`,
+    `Overflow capacity target: 530 mL ±10 mL`,
+    `Material: PLA + enzyme additive system; food-contact grade`,
+    `Neck/closure: 28mm tamper-evident screw; PLA/CPLA cap; linerless plug`,
+    `Required label/code pack: Statement of identity; net quantity; manufacturer/packer/distributor address; lot/date; RIC 7 PLA; compostability qualifier if certified`,
+    `Compliance validation: Food-contact migration; seal/leak; top-load/drop; ASTM D6400 or EN 13432 for compostability claims`
+  ].join("\n");
+  state.revision += 1;
+  state.bridge.activeDocument = `${variant.id}-${sanitizeFilename(variant.concept)}.SLDPRT`;
+  state.designTable.rows = buildDesignTableRows();
+  state.analysis.material = buildMaterialAssessment("PLA + enzyme additive system", state.parameters);
+  state.analysis.simulation = null;
+  state.analysis.optimization = null;
+  lookupStandards();
 }
 
 function applyParameterChanges() {
@@ -1040,7 +1416,7 @@ function applyAiPayload(payload, fallbackReply) {
 }
 
 function makeAiInstruction() {
-  return [
+  const lines = [
     "You are a CAD copilot for SolidWorks parametric design.",
     "Return only valid JSON.",
     "Schema: {",
@@ -1058,7 +1434,17 @@ function makeAiInstruction() {
     "Use imageGeometry profiles as guide-curve inputs when available.",
     "Use designTable rows as SolidWorks dimension mappings when available.",
     "Keep parameters numeric and use millimeters unless another unit is required."
-  ].join("\n");
+  ];
+  const constraintLines = buildStandardsConstraints();
+  if (constraintLines.length) {
+    lines.push("Active regulatory standards constraints — parameters MUST satisfy these:");
+    lines.push(...constraintLines);
+  }
+  const labelText = buildStandardsLabelText();
+  if (labelText) {
+    lines.push(`Required label text: ${labelText}`);
+  }
+  return lines.join("\n");
 }
 
 function extractResponseText(response) {
@@ -1591,15 +1977,35 @@ function renderCopilot() {
 }
 
 function renderRequirements() {
+  const matchedStandards = state.standards?.matched || [];
+  const selectedStandards = state.standards?.selected || [];
+  const activeConstraints = buildStandardsConstraints();
+  const labelText = buildStandardsLabelText();
+
   document.getElementById("requirementsPanel").innerHTML = `
     <div class="panel-header">
       <div>
         <span class="eyebrow">Requirements intake</span>
-        <h2>Brief and files</h2>
+        <h2>Brief, standards & files</h2>
       </div>
     </div>
     <div class="panel-body fill-panel">
       <div class="field-grid">
+        <div class="workflow-steps">
+          <div class="workflow-step ${state.prompt ? "done" : ""}">
+            <span class="step-num">1</span><span>Input</span>
+          </div>
+          <div class="workflow-step ${matchedStandards.length ? "done" : ""}">
+            <span class="step-num">2</span><span>Standards</span>
+          </div>
+          <div class="workflow-step ${state.parameters.length ? "done" : ""}">
+            <span class="step-num">3</span><span>Parameters</span>
+          </div>
+          <div class="workflow-step ${state.bridge.status === "Synced" || state.cloud.status === "Synced" ? "done" : ""}">
+            <span class="step-num">4</span><span>SolidWorks</span>
+          </div>
+        </div>
+
         <div class="field-row">
           <div>
             <label for="templateSelect">Template</label>
@@ -1613,30 +2019,78 @@ function renderRequirements() {
             </select>
           </div>
           <div>
-            <label for="requirementFiles">Upload</label>
-            <input id="requirementFiles" type="file" multiple>
+            <label for="variantSelect">STREAMS variant</label>
+            <select id="variantSelect">
+              <option value="">— Load variant —</option>
+              ${BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("")}
+            </select>
           </div>
         </div>
+
         <div class="field-row">
           <div>
             <label for="imageFiles">Reference images</label>
             <input id="imageFiles" type="file" accept="image/*" multiple>
           </div>
           <div>
-            <label for="tableFiles">Spreadsheet/design table</label>
+            <label for="tableFiles">Spreadsheet / design table</label>
             <input id="tableFiles" type="file" accept=".csv,.tsv,.txt,.xlsx" multiple>
           </div>
         </div>
+        <div class="field-row">
+          <div>
+            <label for="requirementFiles">Brief files</label>
+            <input id="requirementFiles" type="file" multiple>
+          </div>
+        </div>
+
         <div>
           <label for="requirementText">Requirements</label>
           <textarea id="requirementText">${escapeHtml(state.requirementText)}</textarea>
         </div>
+
         <div class="button-row">
-          <button class="button primary" data-action="generate-model">Generate model</button>
+          <button class="button primary" data-action="generate-model">Generate + match standards</button>
           <button class="button secondary" data-action="ask-ai">Send to AI</button>
           <button class="button secondary" data-action="export-design-table">Export design table</button>
           <button class="button ghost" data-action="reset-demo">Reset</button>
         </div>
+
+        <div class="standards-section">
+          <div class="standards-header">
+            <label>Standards &amp; compliance</label>
+            <button class="button ghost" data-action="lookup-standards">Auto-match</button>
+          </div>
+          ${state.standards?.note ? `<p class="standards-note">${escapeHtml(state.standards.note)}</p>` : ""}
+          <div class="standards-list">
+            ${matchedStandards.length ? matchedStandards.map(std => `
+              <label class="standard-item">
+                <input type="checkbox" class="standard-checkbox" data-standard-id="${escapeHtml(std.id)}" ${selectedStandards.includes(std.id) ? "checked" : ""}>
+                <div class="standard-info">
+                  <div class="standard-id-row">
+                    <span class="standard-id">${escapeHtml(std.id)}</span>
+                    <span class="badge">${escapeHtml(std.category)}</span>
+                  </div>
+                  <span class="standard-title">${escapeHtml(std.title)}</span>
+                  ${std.testRequired ? `<span class="standard-test">Tests: ${escapeHtml(std.testRequired)}</span>` : ""}
+                </div>
+              </label>
+            `).join("") : `<p class="standards-empty">Click "Auto-match" or "Generate + match standards" to detect applicable standards from your prompt and material.</p>`}
+          </div>
+          ${activeConstraints.length ? `
+            <div class="standards-constraints">
+              <strong>Parameter constraints from selected standards:</strong>
+              <ul>${activeConstraints.map(c => `<li>${escapeHtml(c.replace(/^- /, ""))}</li>`).join("")}</ul>
+            </div>
+          ` : ""}
+          ${labelText ? `
+            <div class="standards-labels">
+              <strong>Required on label:</strong>
+              <p>${escapeHtml(labelText)}</p>
+            </div>
+          ` : ""}
+        </div>
+
         <div class="intake-grid">
           <div class="upload-list">
             ${state.uploadedFiles.length ? state.uploadedFiles.map(file => `
@@ -1908,12 +2362,28 @@ document.addEventListener("click", event => {
   if (action === "export-design-table") exportDesignTable();
   if (action === "export-snapshot") exportSnapshot();
   if (action === "reset-demo") resetDemo();
+  if (action === "lookup-standards") lookupStandards();
 });
 
 document.addEventListener("change", event => {
   if (event.target.id === "requirementFiles") handleRequirementUpload(event.target.files);
   if (event.target.id === "imageFiles") handleImageUpload(event.target.files);
   if (event.target.id === "tableFiles") handleTableUpload(event.target.files);
+  if (event.target.id === "variantSelect" && event.target.value) {
+    loadBottleVariant(event.target.value);
+    event.target.value = "";
+  }
+  if (event.target.classList.contains("standard-checkbox")) {
+    const id = event.target.dataset.standardId;
+    if (!id) return;
+    state.standards = state.standards || { matched: [], selected: [] };
+    if (event.target.checked) {
+      if (!state.standards.selected.includes(id)) state.standards.selected = [...state.standards.selected, id];
+    } else {
+      state.standards.selected = state.standards.selected.filter(sid => sid !== id);
+    }
+    persist();
+  }
   if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl"].includes(event.target.id)) {
     syncDraftFromDom();
     persist();
