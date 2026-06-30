@@ -172,12 +172,13 @@ label,
 
 .panel-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-height: 70px;
   padding: 16px 16px 12px;
   border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
 }
 
 .panel-header h2 {
@@ -693,26 +694,28 @@ td code {
   }
 }
 
-/* Workflow progress steps */
+/* Workflow progress steps — lives in panel-header */
 .workflow-steps {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .workflow-step {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex: 1;
-  padding: 6px 10px;
+  gap: 5px;
+  padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--quiet);
   background: var(--surface-alt);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .workflow-step.done {
@@ -725,12 +728,12 @@ td code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: var(--line);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   flex-shrink: 0;
 }
 

@@ -1,20 +1,12 @@
-const STORAGE_KEY = "solidworks-ai-cad-studio-v3";
+const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_BRIDGE_URL = "";
 const DEFAULT_AI_ENDPOINT = "";
 const DEFAULT_CLOUD_SPACE_URL = "https://my.3dexperience.3ds.com/";
 const DEFAULT_XDESIGN_INFO_URL = "https://www.solidworks.com/product/solidworks-xdesign";
-const DEFAULT_PROMPT = "Design a portable diagnostic enclosure for a point-of-care diagnostic device.";
-const DEFAULT_REQUIREMENTS = `Project: Portable diagnostic enclosure
-Overall length 170 mm
-Overall width 95 mm
-Overall height 42 mm
-Wall thickness 2.5 mm
-Corner radius 8 mm
-Fit a 120 x 70 mm PCB
-Include four M3 fastener bosses
-Material: medical-grade PC-ABS`;
+const DEFAULT_PROMPT = "";
+const DEFAULT_REQUIREMENTS = "";
 
 const NUMBER_WORDS = {
   one: 1,
@@ -406,10 +398,9 @@ function loadState() {
 }
 
 function createDefaultState() {
-  const blueprint = buildModelBlueprint(DEFAULT_PROMPT, DEFAULT_REQUIREMENTS, "auto");
   return {
-    prompt: DEFAULT_PROMPT,
-    requirementText: DEFAULT_REQUIREMENTS,
+    prompt: "",
+    requirementText: "",
     selectedTemplate: "auto",
     uploadedFiles: [],
     revision: 1,
@@ -418,13 +409,13 @@ function createDefaultState() {
       model: DEFAULT_MODEL,
       endpoint: DEFAULT_AI_ENDPOINT,
       status: "Local parser",
-      lastReply: "Use the local parser, add an OpenAI key, or connect an AI endpoint to generate and revise the model."
+      lastReply: "Describe your part and click Generate, or pick a template to start with defaults."
     },
     bridge: {
       url: DEFAULT_BRIDGE_URL,
       status: "Optional",
       embedUrl: "",
-      activeDocument: blueprint.targetDoc,
+      activeDocument: "new-design.SLDPRT",
       lastSync: "",
       lastMessage: "Local SolidWorks bridge is optional. Use cloud mode for browser-based CAD."
     },
@@ -440,10 +431,17 @@ function createDefaultState() {
       lastSync: "",
       lastMessage: "Sign in to 3DEXPERIENCE/xDesign for browser-based CAD without local SolidWorks."
     },
-    concept: blueprint.concept,
-    requirements: blueprint.requirements,
-    parameters: blueprint.parameters,
-    solidworksIntent: blueprint.solidworksIntent,
+    concept: {
+      title: "New design",
+      family: "assembly",
+      familyLabel: "Assembly",
+      material: "",
+      features: [],
+      revision: "R01"
+    },
+    requirements: [],
+    parameters: [],
+    solidworksIntent: { documentType: "part", rebuildMode: "parametric", operations: [] },
     geometry: {
       images: [],
       transitionMatrix: [],
@@ -457,7 +455,7 @@ function createDefaultState() {
     analysis: {
       simulation: null,
       optimization: null,
-      material: buildMaterialAssessment(blueprint.concept.material, blueprint.parameters)
+      material: buildMaterialAssessment("", [])
     },
     agents: AGENT_LANES.map(agent => ({
       ...agent,
@@ -1986,31 +1984,23 @@ function renderRequirements() {
     <div class="panel-header">
       <div>
         <span class="eyebrow">Requirements intake</span>
-        <h2>Brief, standards & files</h2>
+        <h2>Brief, standards &amp; files</h2>
+      </div>
+      <div class="workflow-steps">
+        <div class="workflow-step ${state.prompt ? "done" : ""}"><span class="step-num">1</span><span>Input</span></div>
+        <div class="workflow-step ${matchedStandards.length ? "done" : ""}"><span class="step-num">2</span><span>Standards</span></div>
+        <div class="workflow-step ${state.parameters.length ? "done" : ""}"><span class="step-num">3</span><span>Parameters</span></div>
+        <div class="workflow-step ${state.bridge.status === "Synced" || state.cloud.status === "Synced" ? "done" : ""}"><span class="step-num">4</span><span>CAD</span></div>
       </div>
     </div>
     <div class="panel-body fill-panel">
       <div class="field-grid">
-        <div class="workflow-steps">
-          <div class="workflow-step ${state.prompt ? "done" : ""}">
-            <span class="step-num">1</span><span>Input</span>
-          </div>
-          <div class="workflow-step ${matchedStandards.length ? "done" : ""}">
-            <span class="step-num">2</span><span>Standards</span>
-          </div>
-          <div class="workflow-step ${state.parameters.length ? "done" : ""}">
-            <span class="step-num">3</span><span>Parameters</span>
-          </div>
-          <div class="workflow-step ${state.bridge.status === "Synced" || state.cloud.status === "Synced" ? "done" : ""}">
-            <span class="step-num">4</span><span>SolidWorks</span>
-          </div>
-        </div>
 
         <div class="field-row">
           <div>
             <label for="templateSelect">Template</label>
             <select id="templateSelect">
-              <option value="auto" ${state.selectedTemplate === "auto" ? "selected" : ""}>Auto</option>
+              <option value="auto" ${state.selectedTemplate === "auto" ? "selected" : ""}>Auto-detect</option>
               <option value="enclosure" ${state.selectedTemplate === "enclosure" ? "selected" : ""}>Enclosure</option>
               <option value="bottle" ${state.selectedTemplate === "bottle" ? "selected" : ""}>Bottle</option>
               <option value="bracket" ${state.selectedTemplate === "bracket" ? "selected" : ""}>Bracket</option>
@@ -2018,26 +2008,25 @@ function renderRequirements() {
               <option value="assembly" ${state.selectedTemplate === "assembly" ? "selected" : ""}>Assembly</option>
             </select>
           </div>
+          ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? `
           <div>
-            <label for="variantSelect">STREAMS variant</label>
+            <label for="variantSelect">Variant</label>
             <select id="variantSelect">
               <option value="">— Load variant —</option>
               ${BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("")}
             </select>
-          </div>
+          </div>` : ""}
         </div>
 
         <div class="field-row">
           <div>
-            <label for="imageFiles">Reference images</label>
+            <label for="imageFiles">Images</label>
             <input id="imageFiles" type="file" accept="image/*" multiple>
           </div>
           <div>
-            <label for="tableFiles">Spreadsheet / design table</label>
+            <label for="tableFiles">Spreadsheet</label>
             <input id="tableFiles" type="file" accept=".csv,.tsv,.txt,.xlsx" multiple>
           </div>
-        </div>
-        <div class="field-row">
           <div>
             <label for="requirementFiles">Brief files</label>
             <input id="requirementFiles" type="file" multiple>
@@ -2046,13 +2035,13 @@ function renderRequirements() {
 
         <div>
           <label for="requirementText">Requirements</label>
-          <textarea id="requirementText">${escapeHtml(state.requirementText)}</textarea>
+          <textarea id="requirementText" placeholder="Describe the part: dimensions, material, features, constraints…">${escapeHtml(state.requirementText)}</textarea>
         </div>
 
         <div class="button-row">
-          <button class="button primary" data-action="generate-model">Generate + match standards</button>
-          <button class="button secondary" data-action="ask-ai">Send to AI</button>
-          <button class="button secondary" data-action="export-design-table">Export design table</button>
+          <button class="button primary" data-action="generate-model">Generate</button>
+          <button class="button secondary" data-action="ask-ai">Ask AI</button>
+          <button class="button secondary" data-action="export-design-table">Export CSV</button>
           <button class="button ghost" data-action="reset-demo">Reset</button>
         </div>
 
@@ -2091,34 +2080,6 @@ function renderRequirements() {
           ` : ""}
         </div>
 
-        <div class="intake-grid">
-          <div class="upload-list">
-            ${state.uploadedFiles.length ? state.uploadedFiles.map(file => `
-              <div class="upload-item">
-                <strong>${escapeHtml(file.name)}</strong>
-                <span>${file.parsed ? "parsed" : "stored"}</span>
-              </div>
-            `).join("") : `<div class="upload-item"><strong>No brief files</strong><span>txt, md, json, csv</span></div>`}
-          </div>
-          <div class="upload-list">
-            ${state.geometry.images.length ? state.geometry.images.map(image => `
-              <div class="upload-item">
-                <strong>${escapeHtml(image.name)}</strong>
-                <span>${image.confidence}% contour</span>
-              </div>
-            `).join("") : `<div class="upload-item"><strong>No image profiles</strong><span>contours</span></div>`}
-          </div>
-          <div class="upload-list">
-            <div class="upload-item">
-              <strong>${escapeHtml(state.designTable.lastMessage)}</strong>
-              <span>${state.designTable.rows.length || state.parameters.length} rows</span>
-            </div>
-            <div class="upload-item">
-              <strong>${escapeHtml(state.geometry.lastMessage)}</strong>
-              <span>${state.geometry.transitionMatrix.length} matrix steps</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   `;
