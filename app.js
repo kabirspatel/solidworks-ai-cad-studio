@@ -300,6 +300,41 @@ const BOTTLE_VARIANTS = [
   { id:"B25", concept:"Final iconic taper",     morph:"07→09", H:230,  W:75.48, D:75.48, wall:0.70, base:1.7, neckOD:28, mouthID:21, shoulderH:28, neckH:25, supN:2.2,  ribCount:0,  ribDepth:0,    ringCount:0, ringDepth:0,    facetCount:0,  facetDepth:0,    helixCount:0,  helixDepth:0,    helixTurns:0   }
 ];
 
+const BOTTLE_SLIDER_CONFIG = [
+  { key:"height",        swKey:"D1@HEIGHT",           label:"Body height",           min:200,  max:235,  step:1,    unit:"mm",    integer:false },
+  { key:"bodyDiameter",  swKey:"D2@BODY_DIAMETER",    label:"Max body width",        min:56,   max:88,   step:0.1,  unit:"mm",    integer:false },
+  { key:"bodyDepth",     swKey:"D3@BODY_DEPTH",       label:"Body depth",            min:50,   max:80,   step:0.1,  unit:"mm",    integer:false },
+  { key:"shoulderHeight",swKey:"D8@SHOULDER_H",       label:"Shoulder height",       min:20,   max:45,   step:1,    unit:"mm",    integer:true  },
+  { key:"superellipseN", swKey:"D11@SUPERELLIPSE_N",  label:"Silhouette squareness", min:1.8,  max:4.2,  step:0.05, unit:"",      integer:false },
+  { key:"wall",          swKey:"D4@WALL",             label:"Wall thickness",        min:0.65, max:0.85, step:0.01, unit:"mm",    integer:false },
+  { key:"ribCount",      swKey:"D12@RIB_COUNT",       label:"Vertical rib count",    min:0,    max:60,   step:1,    unit:"",      integer:true  },
+  { key:"ribDepth",      swKey:"D13@RIB_DEPTH",       label:"Vertical rib depth",    min:0,    max:1.5,  step:0.05, unit:"mm",    integer:false },
+  { key:"ringCount",     swKey:"D19@RING_COUNT",      label:"Horizontal ring count", min:0,    max:12,   step:1,    unit:"",      integer:true  },
+  { key:"ringDepth",     swKey:"D20@RING_DEPTH",      label:"Horizontal ring depth", min:0,    max:1.3,  step:0.05, unit:"mm",    integer:false },
+  { key:"facetCount",    swKey:"D14@FACET_COUNT",     label:"Facet / panel count",   min:0,    max:16,   step:1,    unit:"",      integer:true  },
+  { key:"facetDepth",    swKey:"D15@FACET_DEPTH",     label:"Facet depth",           min:0,    max:1.5,  step:0.05, unit:"mm",    integer:false },
+  { key:"helixRidges",   swKey:"D16@HELIX_RIDGES",   label:"Helix ridge count",     min:0,    max:14,   step:1,    unit:"",      integer:true  },
+  { key:"helixDepth",    swKey:"D17@HELIX_DEPTH",     label:"Helix ridge depth",     min:0,    max:1.5,  step:0.05, unit:"mm",    integer:false },
+  { key:"helixTurns",    swKey:"D18@HELIX_TURNS",    label:"Helix turns",           min:0,    max:2.2,  step:0.05, unit:"turns", integer:false },
+];
+
+const BOTTLE_MORPH_FAMILIES = {
+  "01→03": "Minimal cylinder → Sculpted icon",
+  "04→06": "Ribbed cylinder → Structural ring",
+  "07→08": "Lavender facets → Spiral grip",
+  "08→09": "Spiral → Tapered icon",
+  "07→09": "Full architecture-to-icon journey",
+};
+
+const BOTTLE_LOCKS = [
+  ["Fill target",  "500 mL nominal / 530 mL overflow target"],
+  ["Neck finish",  "28 mm OD / 21 mm mouth ID"],
+  ["Thread pitch", "3 mm conceptual screw thread"],
+  ["Cap envelope", "32 mm OD × 18 mm H"],
+  ["Base control", "Standing ring locked; min base 1.4 mm"],
+  ["Material",     "PLA + enzyme additive system"],
+];
+
 const AGENT_LANES = [
   { key: "design", label: "Design", role: "Generate geometry options and feature logic." },
   { key: "standards", label: "Standards", role: "Check requirements, manufacturing rules, and constraints." },
@@ -516,7 +551,8 @@ function normalizeState(saved) {
       matched: Array.isArray(saved.standards?.matched) ? saved.standards.matched : defaults.standards.matched,
       selected: Array.isArray(saved.standards?.selected) ? saved.standards.selected : defaults.standards.selected
     },
-    cadServer: { ...defaults.cadServer, ...(saved.cadServer || {}) }
+    cadServer: { ...defaults.cadServer, ...(saved.cadServer || {}) },
+    _bottleMorph: saved._bottleMorph || null
   };
 }
 
@@ -2154,6 +2190,121 @@ function renderCopilot() {
   `;
 }
 
+// ── bottle slider helpers ─────────────────────────────────────────────────────
+
+function saveOnly() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function getBottleParam(key) {
+  const p = state.parameters.find(p => p.key === key);
+  return p != null ? p.value : null;
+}
+
+function setBottleParam(key, val) {
+  const p = state.parameters.find(p => p.key === key);
+  if (p) { p.value = val; p.source = "Slider"; }
+  else {
+    const cfg = BOTTLE_SLIDER_CONFIG.find(c => c.key === key);
+    if (cfg) state.parameters.push({ key, label: cfg.label, unit: cfg.unit, value: val, source: "Slider", swDimension: cfg.swKey, aliases: [] });
+  }
+}
+
+function morphBottleAtPct(famKey, pct) {
+  const seeds = BOTTLE_VARIANTS.filter(v => v.morph === famKey)
+    .sort((a, b) => parseInt(a.id.slice(1)) - parseInt(b.id.slice(1)));
+  if (!seeds.length) return null;
+  const t = pct / 100;
+  const a = seeds[0], b = seeds[seeds.length - 1];
+  const lerp = (x, y) => x + (y - x) * t;
+  return {
+    H: lerp(a.H, b.H), W: lerp(a.W, b.W), D: lerp(a.D, b.D),
+    wall: lerp(a.wall, b.wall), base: lerp(a.base, b.base),
+    neckOD: a.neckOD, mouthID: a.mouthID, neckH: a.neckH,
+    shoulderH: lerp(a.shoulderH, b.shoulderH),
+    supN: lerp(a.supN, b.supN),
+    ribCount:   Math.round(lerp(a.ribCount, b.ribCount)),
+    ribDepth:   lerp(a.ribDepth, b.ribDepth),
+    ringCount:  Math.round(lerp(a.ringCount || 0, b.ringCount || 0)),
+    ringDepth:  lerp(a.ringDepth || 0, b.ringDepth || 0),
+    facetCount: Math.round(lerp(a.facetCount, b.facetCount)),
+    facetDepth: lerp(a.facetDepth, b.facetDepth),
+    helixCount: Math.round(lerp(a.helixCount, b.helixCount)),
+    helixDepth: lerp(a.helixDepth, b.helixDepth),
+    helixTurns: lerp(a.helixTurns, b.helixTurns),
+  };
+}
+
+function applyMorphedVariant(morphed) {
+  if (!morphed) return;
+  const map = {
+    height:"H", bodyDiameter:"W", bodyDepth:"D", wall:"wall", base:"base",
+    neckDiameter:"neckOD", mouthDiameter:"mouthID", shoulderHeight:"shoulderH",
+    neckHeight:"neckH", superellipseN:"supN",
+    ribCount:"ribCount", ribDepth:"ribDepth", ringCount:"ringCount", ringDepth:"ringDepth",
+    facetCount:"facetCount", facetDepth:"facetDepth",
+    helixRidges:"helixCount", helixDepth:"helixDepth", helixTurns:"helixTurns",
+  };
+  for (const [pk, mk] of Object.entries(map)) {
+    if (morphed[mk] !== undefined) setBottleParam(pk, morphed[mk]);
+  }
+}
+
+function fmtSliderVal(cfg, val) {
+  const n = cfg.integer ? Math.round(val) : val;
+  const decimals = cfg.step >= 1 ? 0 : cfg.step >= 0.05 ? 1 : 2;
+  return `${Number(n).toFixed(decimals)}${cfg.unit ? " " + cfg.unit : ""}`;
+}
+
+function renderBottleSliders() {
+  const morphFamilies = [...new Set(BOTTLE_VARIANTS.map(v => v.morph))];
+  const curFam = state._bottleMorph?.family || morphFamilies[0];
+  const curPct = state._bottleMorph?.pct ?? 0;
+
+  const sliderRows = BOTTLE_SLIDER_CONFIG.map(cfg => {
+    const raw = getBottleParam(cfg.key);
+    const val = raw != null ? Math.max(cfg.min, Math.min(cfg.max, raw)) : cfg.min;
+    return `
+      <div class="bsl-row">
+        <label class="bsl-label">
+          <span>${cfg.label}</span>
+          <span class="bsl-val" id="bslv-${cfg.key}">${fmtSliderVal(cfg, val)}</span>
+        </label>
+        <input type="range" class="bsl-input" data-bsl="${cfg.key}"
+               min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${val}">
+      </div>`;
+  }).join("");
+
+  const lockRows = BOTTLE_LOCKS.map(([k, v]) =>
+    `<div class="bsl-lock"><b>🔒 ${k}</b><span>${v}</span></div>`
+  ).join("");
+
+  return `
+    <div class="bsl-panel">
+      <div class="bsl-row">
+        <label class="bsl-label">
+          <span>Morph family</span>
+          <span class="bsl-val" id="bslMorphFamLabel">${BOTTLE_MORPH_FAMILIES[curFam] || curFam}</span>
+        </label>
+        <select id="bslMorphFam" style="margin-top:4px">
+          ${morphFamilies.map(f => `<option value="${f}" ${f === curFam ? "selected" : ""}>${f} — ${BOTTLE_MORPH_FAMILIES[f] || f}</option>`).join("")}
+        </select>
+      </div>
+      <div class="bsl-row" style="margin-top:12px">
+        <label class="bsl-label">
+          <span>Morph position</span>
+          <span class="bsl-val" id="bslMorphPctLabel">${curPct}%</span>
+        </label>
+        <input type="range" id="bslMorphPct" min="0" max="100" step="1" value="${curPct}">
+        <p class="bsl-note">Drag to interpolate between the two seed designs in the selected family.</p>
+      </div>
+      <div class="bsl-divider">Editable body parameters</div>
+      ${sliderRows}
+      <div class="bsl-divider">Locked norms</div>
+      <div class="bsl-locks">${lockRows}</div>
+    </div>`;
+}
+
 function renderRequirements() {
   const matchedStandards = state.standards?.matched || [];
   const selectedStandards = state.standards?.selected || [];
@@ -2188,16 +2339,16 @@ function renderRequirements() {
               <option value="assembly" ${state.selectedTemplate === "assembly" ? "selected" : ""}>Assembly</option>
             </select>
           </div>
-          ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? `
           <div>
-            <label for="variantSelect">Variant</label>
+            <label for="variantSelect">${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? "Jump to variant" : "Variant"}</label>
             <select id="variantSelect">
-              <option value="">— Load variant —</option>
-              ${BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("")}
+              <option value="">— Seed a variant —</option>
+              ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? BOTTLE_VARIANTS.map(v => `<option value="${v.id}">${v.id}: ${escapeHtml(v.concept)}</option>`).join("") : ""}
             </select>
-          </div>` : ""}
+          </div>
         </div>
 
+        ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? renderBottleSliders() : `
         <div class="field-row">
           <div>
             <label for="imageFiles">Images</label>
@@ -2212,17 +2363,23 @@ function renderRequirements() {
             <input id="requirementFiles" type="file" multiple>
           </div>
         </div>
-
         <div>
           <label for="requirementText">Requirements</label>
           <textarea id="requirementText" placeholder="Describe the part: dimensions, material, features, constraints…">${escapeHtml(state.requirementText)}</textarea>
-        </div>
+        </div>`}
 
         <div class="button-row">
+          ${(state.concept?.family === "bottle" || state.selectedTemplate === "bottle") ? `
+          <button class="button primary" data-action="send-model">Push to SolidWorks</button>
+          <button class="button secondary" data-action="generate-model">Ask AI</button>
+          <button class="button secondary" data-action="export-design-table">Export CSV</button>
+          <button class="button ghost" data-action="download-sw-vars">Export SW vars</button>
+          ` : `
           <button class="button primary" data-action="generate-model">Generate</button>
           <button class="button secondary" data-action="ask-ai">Ask AI</button>
           <button class="button secondary" data-action="export-design-table">Export CSV</button>
           <button class="button ghost" data-action="reset-demo">Reset</button>
+          `}
         </div>
 
         <div class="standards-section">
@@ -2700,6 +2857,46 @@ document.addEventListener("click", event => {
   if (action === "export-snapshot") exportSnapshot();
   if (action === "reset-demo") resetDemo();
   if (action === "lookup-standards") lookupStandards();
+  if (action === "download-sw-vars") downloadSolidWorksMacro();
+});
+
+// ── bottle slider live input ──────────────────────────────────────────────────
+document.addEventListener("input", event => {
+  const bslKey = event.target.dataset?.bsl;
+  if (bslKey) {
+    const cfg = BOTTLE_SLIDER_CONFIG.find(c => c.key === bslKey);
+    if (!cfg) return;
+    let val = Number(event.target.value);
+    if (cfg.integer) val = Math.round(val);
+    setBottleParam(bslKey, val);
+    const lbl = document.getElementById("bslv-" + bslKey);
+    if (lbl) lbl.textContent = fmtSliderVal(cfg, val);
+    saveOnly();
+    requestAnimationFrame(mount3DViewer);
+    return;
+  }
+  if (event.target.id === "bslMorphPct") {
+    const pct = Number(event.target.value);
+    state._bottleMorph = state._bottleMorph || {};
+    const fam = state._bottleMorph.family || [...new Set(BOTTLE_VARIANTS.map(v => v.morph))][0];
+    state._bottleMorph.pct = pct;
+    const morphed = morphBottleAtPct(fam, pct);
+    applyMorphedVariant(morphed);
+    const pctLbl = document.getElementById("bslMorphPctLabel");
+    if (pctLbl) pctLbl.textContent = `${pct}%`;
+    // Sync all sliders to new interpolated values without re-render
+    for (const cfg of BOTTLE_SLIDER_CONFIG) {
+      const v = getBottleParam(cfg.key);
+      if (v == null) continue;
+      const clamped = Math.max(cfg.min, Math.min(cfg.max, v));
+      const slEl = document.querySelector(`[data-bsl="${cfg.key}"]`);
+      const lblEl = document.getElementById("bslv-" + cfg.key);
+      if (slEl) slEl.value = clamped;
+      if (lblEl) lblEl.textContent = fmtSliderVal(cfg, clamped);
+    }
+    saveOnly();
+    requestAnimationFrame(mount3DViewer);
+  }
 });
 
 document.addEventListener("change", event => {
@@ -2709,6 +2906,13 @@ document.addEventListener("change", event => {
   if (event.target.id === "variantSelect" && event.target.value) {
     loadBottleVariant(event.target.value);
     event.target.value = "";
+  }
+  if (event.target.id === "bslMorphFam") {
+    const fam = event.target.value;
+    state._bottleMorph = { family: fam, pct: 0 };
+    const seeds = BOTTLE_VARIANTS.filter(v => v.morph === fam);
+    if (seeds.length) loadBottleVariant(seeds[0].id);
+    else persist();
   }
   if (event.target.classList.contains("standard-checkbox")) {
     const id = event.target.dataset.standardId;

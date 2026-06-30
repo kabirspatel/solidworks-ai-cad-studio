@@ -873,3 +873,98 @@ td code {
   color: var(--muted);
   line-height: 1.5;
 }
+
+/* ── Bottle slider panel ──────────────────────────────────────────────────── */
+.bsl-panel {
+  display: grid;
+  gap: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 320px);
+  padding-right: 2px;
+}
+
+.bsl-row {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.bsl-row:last-child {
+  border-bottom: none;
+}
+
+.bsl-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: .02em;
+}
+
+.bsl-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--tool);
+  background: var(--tool-soft);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  min-width: 60px;
+  text-align: right;
+}
+
+input[type="range"].bsl-input,
+#bslMorphPct {
+  width: 100%;
+  accent-color: var(--tool);
+  height: 4px;
+  cursor: pointer;
+}
+
+.bsl-note {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: var(--quiet);
+  line-height: 1.4;
+}
+
+.bsl-divider {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--quiet);
+  padding: 12px 0 5px;
+  border-bottom: 1px solid var(--line-strong);
+  margin-bottom: 4px;
+}
+
+.bsl-locks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.bsl-lock {
+  background: #f0f7f5;
+  border: 1px solid #c2d9d3;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.bsl-lock b {
+  display: block;
+  color: #1e3a30;
+  font-size: 11px;
+  margin-bottom: 1px;
+}
+
+.bsl-lock span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
