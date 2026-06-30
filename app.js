@@ -1,5 +1,6 @@
 const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
+const SESSION_CLAUDE_KEY = "solidworks-ai-claude-key";
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_BRIDGE_URL = "";
 const DEFAULT_AI_ENDPOINT = "";
@@ -1184,6 +1185,7 @@ function syncDraftFromDom() {
   const aiModel = document.getElementById("aiModel");
   const aiEndpoint = document.getElementById("aiEndpoint");
   const aiKey = document.getElementById("aiKey");
+  const claudeKey = document.getElementById("claudeKey");
   const bridgeUrl = document.getElementById("bridgeUrl");
   const cloudBrokerUrl = document.getElementById("cloudBrokerUrl");
   const cloudSpaceUrl = document.getElementById("cloudSpaceUrl");
@@ -1195,6 +1197,7 @@ function syncDraftFromDom() {
   if (aiModel) state.ai.model = aiModel.value.trim() || DEFAULT_MODEL;
   if (aiEndpoint) state.ai.endpoint = aiEndpoint.value.trim();
   if (aiKey && aiKey.value.trim()) sessionStorage.setItem(SESSION_AI_KEY, aiKey.value.trim());
+  if (claudeKey && claudeKey.value.trim()) sessionStorage.setItem(SESSION_CLAUDE_KEY, claudeKey.value.trim());
   if (bridgeUrl) state.bridge.url = bridgeUrl.value.trim();
   if (cloudBrokerUrl) state.cloud.brokerUrl = cloudBrokerUrl.value.trim();
   if (cloudSpaceUrl) {
@@ -1399,7 +1402,7 @@ function applyAiPayload(payload, fallbackReply) {
   state.solidworksIntent = payload.solidworksIntent || localBlueprint.solidworksIntent;
   state.bridge.activeDocument = `${sanitizeFilename(title)}.SLDPRT`;
   state.bridge.lastMessage = `AI updated revision R${String(state.revision).padStart(2, "0")}`;
-  state.ai.status = state.ai.mode === "openai" ? "OpenAI connected" : state.ai.mode === "bridge" ? "Endpoint connected" : "Parser";
+  state.ai.status = state.ai.mode === "openai" ? "OpenAI connected" : state.ai.mode === "claude" ? "Claude connected" : state.ai.mode === "bridge" ? "Endpoint connected" : "Parser";
   state.ai.lastReply = payload.reply || fallbackReply || "AI updated the current model.";
   state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
   if (payload.analysis) {
@@ -1496,6 +1499,35 @@ async function callOpenAI() {
   return parseJsonFromText(extractResponseText(data));
 }
 
+async function callClaude() {
+  const key = sessionStorage.getItem(SESSION_CLAUDE_KEY);
+  if (!key) throw new Error("Add a Claude (Anthropic) API key for this browser session.");
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: state.ai.model || "claude-sonnet-4-6",
+      max_tokens: 1600,
+      system: makeAiInstruction(),
+      messages: [{ role: "user", content: JSON.stringify(makeCurrentModelPayload(), null, 2) }]
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = data.error?.message || `Claude request failed (${response.status})`;
+    throw new Error(detail);
+  }
+  const text = data.content?.[0]?.text || "";
+  return parseJsonFromText(text);
+}
+
 async function callAiEndpoint() {
   if (!state.ai.endpoint) throw new Error("Add an AI endpoint URL.");
   const response = await fetch(state.ai.endpoint, {
@@ -1521,12 +1553,14 @@ async function askCopilot() {
     let payload;
     if (state.ai.mode === "openai") {
       payload = await callOpenAI();
+    } else if (state.ai.mode === "claude") {
+      payload = await callClaude();
     } else if (state.ai.mode === "bridge") {
       payload = await callAiEndpoint();
     } else {
       const blueprint = buildModelBlueprint(state.prompt, state.requirementText, state.selectedTemplate);
       payload = {
-        reply: "Local parser generated a deterministic model. Connect OpenAI or an AI endpoint for generative reasoning.",
+        reply: "Local parser generated a deterministic model. Select Claude or OpenAI in the AI source dropdown for generative reasoning.",
         title: blueprint.concept.title,
         family: blueprint.concept.family,
         material: blueprint.concept.material,
@@ -1932,25 +1966,32 @@ function renderCopilot() {
           <div>
             <label for="aiMode">AI source</label>
             <select id="aiMode">
-              <option value="openai" ${state.ai.mode === "openai" ? "selected" : ""}>OpenAI key</option>
+              <option value="claude" ${state.ai.mode === "claude" ? "selected" : ""}>Claude (Anthropic)</option>
+              <option value="openai" ${state.ai.mode === "openai" ? "selected" : ""}>OpenAI</option>
               <option value="bridge" ${state.ai.mode === "bridge" ? "selected" : ""}>AI endpoint</option>
               <option value="parser" ${state.ai.mode === "parser" ? "selected" : ""}>Local parser</option>
             </select>
           </div>
           <div>
             <label for="aiModel">Model</label>
-            <input id="aiModel" value="${escapeHtml(state.ai.model || DEFAULT_MODEL)}">
+            <input id="aiModel" value="${escapeHtml(state.ai.model || DEFAULT_MODEL)}" placeholder="${state.ai.mode === "claude" ? "claude-sonnet-4-6" : state.ai.mode === "openai" ? "gpt-4o" : "model-name"}">
           </div>
         </div>
         <div class="field-grid">
+          ${state.ai.mode === "claude" ? `
+          <div>
+            <label for="claudeKey">Anthropic API key</label>
+            <input id="claudeKey" type="password" placeholder="${sessionStorage.getItem(SESSION_CLAUDE_KEY) ? "Key loaded for this tab" : "sk-ant-..."}">
+          </div>` : state.ai.mode === "openai" ? `
           <div>
             <label for="aiKey">OpenAI API key</label>
             <input id="aiKey" type="password" placeholder="${keyPresent ? "Key loaded for this tab" : "sk-..."}">
-          </div>
+          </div>` : ""}
+          ${state.ai.mode === "bridge" ? `
           <div>
-            <label for="aiEndpoint">AI endpoint</label>
+            <label for="aiEndpoint">AI endpoint URL</label>
             <input id="aiEndpoint" value="${escapeHtml(state.ai.endpoint)}" placeholder="https://your-server.example.com/api/copilot">
-          </div>
+          </div>` : ""}
         </div>
         <div class="button-row">
           <button class="button primary" data-action="ask-ai" ${loadingAction === "ask-ai" ? "disabled" : ""}>Ask AI</button>
