@@ -1,6 +1,7 @@
 const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
 const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const SESSION_CLAUDE_KEY = "solidworks-ai-claude-key";
+const SESSION_GEMINI_KEY = "solidworks-ai-gemini-key";
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_BRIDGE_URL = "";
 const DEFAULT_AI_ENDPOINT = "";
@@ -1198,6 +1199,8 @@ function syncDraftFromDom() {
   if (aiEndpoint) state.ai.endpoint = aiEndpoint.value.trim();
   if (aiKey && aiKey.value.trim()) sessionStorage.setItem(SESSION_AI_KEY, aiKey.value.trim());
   if (claudeKey && claudeKey.value.trim()) sessionStorage.setItem(SESSION_CLAUDE_KEY, claudeKey.value.trim());
+  const geminiKey = document.getElementById("geminiKey");
+  if (geminiKey && geminiKey.value.trim()) sessionStorage.setItem(SESSION_GEMINI_KEY, geminiKey.value.trim());
   if (bridgeUrl) state.bridge.url = bridgeUrl.value.trim();
   if (cloudBrokerUrl) state.cloud.brokerUrl = cloudBrokerUrl.value.trim();
   if (cloudSpaceUrl) {
@@ -1402,7 +1405,7 @@ function applyAiPayload(payload, fallbackReply) {
   state.solidworksIntent = payload.solidworksIntent || localBlueprint.solidworksIntent;
   state.bridge.activeDocument = `${sanitizeFilename(title)}.SLDPRT`;
   state.bridge.lastMessage = `AI updated revision R${String(state.revision).padStart(2, "0")}`;
-  state.ai.status = state.ai.mode === "openai" ? "OpenAI connected" : state.ai.mode === "claude" ? "Claude connected" : state.ai.mode === "bridge" ? "Endpoint connected" : "Parser";
+  state.ai.status = { openai: "OpenAI", claude: "Claude", gemini: "Gemini", bridge: "Endpoint" }[state.ai.mode] || "Parser";
   state.ai.lastReply = payload.reply || fallbackReply || "AI updated the current model.";
   state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
   if (payload.analysis) {
@@ -1544,6 +1547,33 @@ async function callAiEndpoint() {
   return typeof data === "string" ? parseJsonFromText(data) : data;
 }
 
+async function callGemini() {
+  const key = sessionStorage.getItem(SESSION_GEMINI_KEY);
+  if (!key) throw new Error("Add a Gemini API key. Get one free at aistudio.google.com.");
+  const model = (state.ai.model || "").startsWith("gemini") ? state.ai.model : "gemini-2.0-flash";
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: makeAiInstruction() }] },
+        contents: [{ role: "user", parts: [{ text: JSON.stringify(makeCurrentModelPayload(), null, 2) }] }],
+        generationConfig: { maxOutputTokens: 1600 }
+      })
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = data.error?.message || `Gemini request failed (${response.status})`;
+    throw new Error(detail);
+  }
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return parseJsonFromText(text);
+}
+
 async function askCopilot() {
   syncDraftFromDom();
   loadingAction = "ask-ai";
@@ -1555,6 +1585,8 @@ async function askCopilot() {
       payload = await callOpenAI();
     } else if (state.ai.mode === "claude") {
       payload = await callClaude();
+    } else if (state.ai.mode === "gemini") {
+      payload = await callGemini();
     } else if (state.ai.mode === "bridge") {
       payload = await callAiEndpoint();
     } else {
@@ -1966,6 +1998,7 @@ function renderCopilot() {
           <div>
             <label for="aiMode">AI source</label>
             <select id="aiMode">
+              <option value="gemini" ${state.ai.mode === "gemini" ? "selected" : ""}>Gemini (free)</option>
               <option value="claude" ${state.ai.mode === "claude" ? "selected" : ""}>Claude (Anthropic)</option>
               <option value="openai" ${state.ai.mode === "openai" ? "selected" : ""}>OpenAI</option>
               <option value="bridge" ${state.ai.mode === "bridge" ? "selected" : ""}>AI endpoint</option>
@@ -1974,11 +2007,15 @@ function renderCopilot() {
           </div>
           <div>
             <label for="aiModel">Model</label>
-            <input id="aiModel" value="${escapeHtml(state.ai.model || DEFAULT_MODEL)}" placeholder="${state.ai.mode === "claude" ? "claude-sonnet-4-6" : state.ai.mode === "openai" ? "gpt-4o" : "model-name"}">
+            <input id="aiModel" value="${escapeHtml(state.ai.model || DEFAULT_MODEL)}" placeholder="${state.ai.mode === "gemini" ? "gemini-2.0-flash" : state.ai.mode === "claude" ? "claude-sonnet-4-6" : state.ai.mode === "openai" ? "gpt-4o" : "model-name"}">
           </div>
         </div>
         <div class="field-grid">
-          ${state.ai.mode === "claude" ? `
+          ${state.ai.mode === "gemini" ? `
+          <div>
+            <label for="geminiKey">Gemini API key <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">Get free key ↗</a></label>
+            <input id="geminiKey" type="password" placeholder="${sessionStorage.getItem(SESSION_GEMINI_KEY) ? "Key loaded for this tab" : "AIza..."}">
+          </div>` : state.ai.mode === "claude" ? `
           <div>
             <label for="claudeKey">Anthropic API key</label>
             <input id="claudeKey" type="password" placeholder="${sessionStorage.getItem(SESSION_CLAUDE_KEY) ? "Key loaded for this tab" : "sk-ant-..."}">
@@ -2192,7 +2229,7 @@ function renderModel() {
               Some SOLIDWORKS/3DEXPERIENCE pages block third-party iframe embedding. If this area refuses to load, use <button class="link-button" data-action="open-cloud">Open / log in</button>.
             </div>
           ` : showBridge ? `<iframe title="Embedded SolidWorks bridge viewer" src="${escapeHtml(bridgeViewer)}"></iframe>` : `
-            <div class="preview-stage">${renderPreviewSvg()}</div>
+            <div class="preview-stage" id="threeViewport"></div>
           `}
         </div>
       </div>
@@ -2334,12 +2371,162 @@ function renderPreviewSvg() {
   `;
 }
 
+// ─── Three.js 3D viewer ──────────────────────────────────────────────────────
+
+let _three = null;
+
+function disposeThree() {
+  if (_three) {
+    cancelAnimationFrame(_three.animId);
+    _three.renderer.dispose();
+    _three.resizeObs.disconnect();
+    _three = null;
+  }
+}
+
+function getP(params, key, fallback) {
+  const p = Array.isArray(params) ? params.find(p => p.key === key) : null;
+  return p ? (Number(p.value) || fallback) : fallback;
+}
+
+function build3DGeometry(family, params) {
+  if (family === "bottle") {
+    const H  = getP(params, "height", 232);
+    const R  = getP(params, "bodyDiameter", 58) / 2;
+    const nR = getP(params, "neckDiameter", 28) / 2;
+    const sH = getP(params, "shoulderHeight", 28);
+    const nH = getP(params, "neckHeight", 25);
+    const bH = 8;
+    const bodyTop = H - sH - nH;
+    const pts = [
+      new THREE.Vector2(R * 0.35, 0),
+      new THREE.Vector2(R, bH),
+      new THREE.Vector2(R, bodyTop),
+      new THREE.Vector2(nR * 1.35, H - nH - 4),
+      new THREE.Vector2(nR, H - nH),
+      new THREE.Vector2(nR, H)
+    ];
+    return new THREE.LatheGeometry(pts, 72);
+  }
+  if (family === "bracket") {
+    const bL = getP(params, "baseLength", 120);
+    const bW = getP(params, "baseWidth", 48);
+    const lH = getP(params, "legHeight", 62);
+    const t  = getP(params, "thickness", 4);
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0); shape.lineTo(bL, 0); shape.lineTo(bL, t);
+    shape.lineTo(t, t); shape.lineTo(t, lH); shape.lineTo(0, lH); shape.lineTo(0, 0);
+    return new THREE.ExtrudeGeometry(shape, { depth: bW, bevelEnabled: false });
+  }
+  if (family === "tray") {
+    const L = getP(params, "length", 220);
+    const W = getP(params, "width", 140);
+    const D = getP(params, "depth", 32);
+    return new THREE.BoxGeometry(L, D, W);
+  }
+  // enclosure + assembly + default
+  const L = getP(params, "length", 170) || getP(params, "baseLength", 120);
+  const W = getP(params, "width", 95)   || getP(params, "baseWidth", 80);
+  const H = getP(params, "height", 42)  || getP(params, "legHeight", 40);
+  return new THREE.BoxGeometry(L || 120, H || 42, W || 80);
+}
+
+function mount3DViewer() {
+  const container = document.getElementById("threeViewport");
+  if (!container) return;
+  disposeThree();
+  if (typeof THREE === "undefined") {
+    container.innerHTML = `<p style="color:#6b8a7a;padding:24px;font-size:13px">Three.js not loaded — check network.</p>`;
+    return;
+  }
+
+  const W = container.clientWidth  || 500;
+  const H = container.clientHeight || 420;
+
+  const scene    = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a2420);
+  scene.fog = new THREE.Fog(0x1a2420, 600, 1200);
+
+  const camera = new THREE.PerspectiveCamera(42, W / H, 0.5, 2000);
+  camera.position.set(0, 140, 340);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(W, H);
+  renderer.shadowMap.enabled = true;
+  container.appendChild(renderer.domElement);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xaaccbb, 0.55));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(120, 220, 140);
+  sun.castShadow = true;
+  scene.add(sun);
+  scene.add(Object.assign(new THREE.DirectionalLight(0x5599ff, 0.25), { position: { x: -100, y: 60, z: -120, set() {} } }));
+  const fill = new THREE.DirectionalLight(0x5599ff, 0.25);
+  fill.position.set(-100, 60, -120);
+  scene.add(fill);
+
+  // Ground grid
+  const grid = new THREE.GridHelper(600, 24, 0x2d4038, 0x232e28);
+  grid.position.y = 0;
+  scene.add(grid);
+
+  // Geometry
+  const geom = build3DGeometry(state.concept.family, state.parameters);
+  geom.computeBoundingBox();
+  const box = geom.boundingBox;
+  const midY = (box.max.y + box.min.y) / 2;
+  const minY = box.min.y;
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x4a9e7c, roughness: 0.28, metalness: 0.12, side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.castShadow = true;
+  mesh.position.y = -minY;
+  scene.add(mesh);
+
+  const edges = new THREE.EdgesGeometry(geom);
+  const wire  = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x7dd4ac, transparent: true, opacity: 0.22 }));
+  wire.position.y = -minY;
+  scene.add(wire);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor  = 0.07;
+  controls.target.set(0, (midY - minY) * 0.9, 0);
+  controls.update();
+
+  let animId;
+  (function loop() {
+    animId = requestAnimationFrame(loop);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+
+  const resizeObs = new ResizeObserver(() => {
+    const nW = container.clientWidth;
+    const nH = container.clientHeight;
+    if (!nW || !nH) return;
+    camera.aspect = nW / nH;
+    camera.updateProjectionMatrix();
+    renderer.setSize(nW, nH);
+  });
+  resizeObs.observe(container);
+
+  _three = { renderer, animId, resizeObs };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function render() {
   renderHeader();
   renderCopilot();
   renderRequirements();
   renderModel();
   renderSpecs();
+  requestAnimationFrame(mount3DViewer);
 }
 
 document.addEventListener("click", event => {
