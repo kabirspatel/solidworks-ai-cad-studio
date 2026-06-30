@@ -1649,12 +1649,110 @@ async function connectBridge() {
   }
 }
 
+function downloadSolidWorksMacro() {
+  const title = state.concept.title || "New design";
+  const params = state.parameters.filter(p => p.unit !== "count");
+  const countParams = state.parameters.filter(p => p.unit === "count");
+  const ts = new Date().toISOString().slice(0, 19).replace("T", " ");
+
+  const varLines = params.map(p => {
+    const val = Number(p.value);
+    const mm = p.unit === "mm" ? "mm" : "";
+    return `    eqMgr.Add2 -1, "${'"'}${p.key}${'"'} = ${val}${mm}", True   '${p.label}`;
+  }).join("\n");
+
+  const countLines = countParams.map(p =>
+    `    eqMgr.Add2 -1, "${'"'}${p.key}${'"'} = ${Number(p.value)}", True   '${p.label}`
+  ).join("\n");
+
+  const dimHints = state.parameters.map(p =>
+    `'   ${p.swDimension || p.key} = ${p.value} ${p.unit}  (parameter: "${p.key}")`
+  ).join("\n");
+
+  const macro = `' ==========================================================
+' SolidWorks AI CAD Studio — Auto-generated macro
+' Project : ${title}
+' Family  : ${state.concept.familyLabel || ""}
+' Material: ${state.concept.material || ""}
+' Generated: ${ts}
+'
+' HOW TO RUN:
+'   1. Open your SolidWorks part or assembly
+'   2. Tools > Macros > Run...  →  select this .swb file
+'   3. Macro adds global variables and rebuilds the model
+'
+' LINK DIMENSIONS:
+'   In SolidWorks, open Tools > Equations, then for each
+'   dimension you want driven, enter:
+'       "D1@Sketch1" = "height"
+'   (use the variable names below instead of hard-coded values)
+'
+' Expected dimension names (swDimension @ feature):
+${dimHints}
+' ==========================================================
+
+Dim swApp As Object
+Dim swDoc As Object
+
+Sub main()
+    Set swApp = Application.SldWorks
+    Set swDoc = swApp.ActiveDoc
+
+    If swDoc Is Nothing Then
+        MsgBox "No document is open in SolidWorks." & Chr(13) & _
+               "Please open your part or assembly first.", 48, "AI CAD Studio"
+        Exit Sub
+    End If
+
+    Dim eqMgr As Object
+    Set eqMgr = swDoc.GetEquationMgr
+
+    ' Remove previously injected AI Studio variables
+    Dim i As Integer
+    For i = eqMgr.GetCount() - 1 To 0 Step -1
+        If eqMgr.Equation(i) <> "" Then
+            Dim existing As String
+            existing = eqMgr.Equation(i)
+            ' Check if this is one of our keys
+            ${state.parameters.map(p => `If InStr(existing, "${'"'}${p.key}${'"'}") > 0 Then eqMgr.Delete i`).join("\n            ")}
+        End If
+    Next i
+
+    ' ── Dimensional parameters (mm) ──────────────────────────
+${varLines}
+
+    ' ── Count / unitless parameters ──────────────────────────
+${countLines}
+
+    ' Rebuild
+    Dim bRet As Boolean
+    bRet = swDoc.EditRebuild3
+
+    Dim msg As String
+    msg = "AI CAD Studio applied ${state.parameters.length} parameters to:" & Chr(13) & swDoc.GetTitle()
+    If Not bRet Then msg = msg & Chr(13) & Chr(13) & "Check SolidWorks warnings — some dimensions may need manual linking."
+    MsgBox msg, 64, "AI CAD Studio"
+End Sub
+`;
+
+  const blob = new Blob([macro], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${sanitizeFilename(title)}.swb`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast(`Macro downloaded — open SolidWorks → Tools > Macros > Run → select ${sanitizeFilename(title)}.swb`);
+}
+
 async function sendToSolidWorks() {
   syncDraftFromDom();
-  if (!state.bridge.url) {
-    showToast("Add a SolidWorks bridge URL");
-    return;
-  }
+
+  // Always download the macro so the user can drive SW directly
+  downloadSolidWorksMacro();
+
+  // Also post to bridge if URL is configured
+  if (!state.bridge.url) return;
 
   loadingAction = "send-model";
   render();
@@ -1667,13 +1765,13 @@ async function sendToSolidWorks() {
       body: JSON.stringify(makeCurrentModelPayload())
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.message || data.error || `SolidWorks bridge returned ${response.status}`);
+    if (!response.ok) throw new Error(data.message || data.error || `Bridge returned ${response.status}`);
     state.bridge.status = "Synced";
     state.bridge.lastSync = new Date().toISOString();
     state.bridge.embedUrl = data.embedUrl || data.viewerUrl || state.bridge.embedUrl || `${baseUrl}/viewer`;
     state.bridge.activeDocument = data.activeDocument || data.document || state.bridge.activeDocument;
-    state.bridge.lastMessage = data.message || "Model sent to SolidWorks";
-    persist("Model sent to SolidWorks");
+    state.bridge.lastMessage = data.message || "Model sent to SolidWorks bridge";
+    persist("Model sent");
   } catch (error) {
     state.bridge.status = "Sync failed";
     state.bridge.lastMessage = error.message;
@@ -2031,22 +2129,11 @@ function renderCopilot() {
           </div>` : ""}
         </div>
         <div class="button-row">
-          <button class="button primary" data-action="ask-ai" ${loadingAction === "ask-ai" ? "disabled" : ""}>Ask AI</button>
-          <button class="button secondary" data-action="generate-model">Local generate</button>
+          <button class="button primary" data-action="ask-ai" ${loadingAction === "ask-ai" ? "disabled" : ""}>
+            ${loadingAction === "ask-ai" ? "Generating…" : "Generate with AI"}
+          </button>
         </div>
-        <div class="ai-output">${escapeHtml(state.ai.lastReply)}</div>
-        <div>
-          <label>Agent lanes</label>
-          <div class="agent-grid">
-            ${state.agents.map(agent => `
-              <article class="agent-card">
-                <span>${escapeHtml(agent.label)}</span>
-                <strong>${escapeHtml(agent.status)}</strong>
-                <p>${escapeHtml(agent.result || agent.role)}</p>
-              </article>
-            `).join("")}
-          </div>
-        </div>
+        ${state.ai.lastReply ? `<div class="ai-output">${escapeHtml(state.ai.lastReply)}</div>` : ""}
       </div>
     </div>
   `;
@@ -2180,11 +2267,11 @@ function renderModel() {
     <div class="panel-body fill-panel">
       <div class="model-tools">
         <div>
-          <label for="bridgeUrl">SolidWorks bridge URL</label>
-          <input id="bridgeUrl" value="${escapeHtml(state.bridge.url)}" placeholder="https://localhost:8787">
+          <label for="bridgeUrl">MacDevBridge URL <span style="font-size:11px;font-weight:400;color:var(--quiet)">(optional — run bridge/MacDevBridge/server.mjs locally)</span></label>
+          <input id="bridgeUrl" value="${escapeHtml(state.bridge.url)}" placeholder="http://127.0.0.1:8787">
         </div>
         <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>Connect</button>
-        <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""}>Send model</button>
+        <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""} title="Downloads a .swb macro — run it in SolidWorks via Tools › Macros › Run">↓ SolidWorks macro</button>
       </div>
       <div class="button-row">
         <button class="button secondary" data-action="simulate" ${loadingAction === "simulate" ? "disabled" : ""}>Run FEA</button>
