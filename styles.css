@@ -136,16 +136,18 @@ label,
 
 .workbench {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(320px, 420px) minmax(460px, 1fr);
-  grid-template-rows: minmax(620px, calc(100vh - 232px)) auto;
+  grid-template-columns: minmax(320px, 430px) minmax(520px, 1fr);
+  grid-template-rows: auto auto auto;
   grid-template-areas:
-    "copilot requirements model"
-    "specs specs specs";
+    "copilot model"
+    "requirements model"
+    "specs fea";
   gap: 14px;
   margin-top: 14px;
 }
 
 .panel {
+  align-self: start;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -168,6 +170,10 @@ label,
 
 .specs-panel {
   grid-area: specs;
+}
+
+.fea-panel {
+  grid-area: fea;
 }
 
 .panel-header {
@@ -256,7 +262,7 @@ textarea {
 }
 
 #requirementText {
-  min-height: 310px;
+  min-height: 150px;
 }
 
 .button-row,
@@ -339,6 +345,81 @@ textarea {
   color: var(--quiet);
   font-size: 11px;
   line-height: 1.4;
+}
+
+.panel-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.upload-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.upload-card,
+.artifact-card,
+.readout-box {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.upload-card input[type="file"] {
+  background: white;
+}
+
+.artifact-list {
+  display: grid;
+  gap: 6px;
+}
+
+.artifact-card {
+  background: white;
+}
+
+.artifact-card b {
+  color: var(--tool);
+  font-size: 11px;
+}
+
+.artifact-card span,
+.readout-box {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.settings-details {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.settings-details summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.compact-details {
+  margin-top: 8px;
 }
 
 .idea-upload,
@@ -570,6 +651,29 @@ textarea {
   height: 100% !important;
 }
 
+.preview-fallback {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+  padding: 24px;
+  color: #dbe8e5;
+  text-align: center;
+}
+
+.preview-fallback svg {
+  width: min(420px, 80%);
+  max-height: 260px;
+  margin-bottom: 12px;
+}
+
+.preview-fallback p {
+  max-width: 440px;
+  margin: 0;
+  color: #a8c0ba;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .preview-telemetry {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -631,6 +735,34 @@ textarea {
   text-transform: uppercase;
 }
 
+.cad-action-row {
+  padding-top: 2px;
+}
+
+.button-stack {
+  display: grid;
+  align-content: end;
+  gap: 8px;
+}
+
+.parameter-body {
+  display: grid;
+  gap: 12px;
+}
+
+.parameter-selector-row {
+  align-items: end;
+}
+
+.generic-sliders {
+  display: grid;
+  gap: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
 .specs-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
@@ -680,6 +812,19 @@ td code {
   padding: 14px;
   border-left: 1px solid var(--line);
   background: var(--surface-alt);
+}
+
+.compact-summary {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.specs-table-details .table-wrap {
+  max-height: 340px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
 }
 
 .spec-summary h3 {
@@ -739,11 +884,12 @@ td code {
 @media (max-width: 1180px) {
   .workbench {
     grid-template-columns: minmax(300px, .9fr) minmax(430px, 1.1fr);
-    grid-template-rows: auto minmax(560px, auto) auto;
+    grid-template-rows: auto auto auto auto;
     grid-template-areas:
-      "copilot requirements"
-      "model model"
-      "specs specs";
+      "copilot model"
+      "requirements model"
+      "specs specs"
+      "fea fea";
   }
 }
 
@@ -753,11 +899,12 @@ td code {
   }
 
   .topbar,
-  .specs-body,
   .model-tools,
   .cloud-panel .field-row,
   .bridge-strip,
   .preview-telemetry,
+  .upload-grid,
+  .fea-grid,
   .intake-grid,
   .agent-grid,
   .field-row,
@@ -779,8 +926,9 @@ td code {
     grid-template-areas:
       "copilot"
       "requirements"
+      "specs"
       "model"
-      "specs";
+      "fea";
   }
 
   #requirementText {
@@ -970,6 +1118,45 @@ td code {
   margin: 0;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.fea-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fea-card,
+.recommendation-list {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
+.fea-card span,
+.recommendation-list strong {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.fea-card strong {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.fea-card p,
+.recommendation-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* ── Bottle slider panel ──────────────────────────────────────────────────── */

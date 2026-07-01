@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=14 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=15 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -19,7 +19,7 @@ A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user 
 ## File map
 
 ```
-index.html               — single-page shell, 4 panel sections
+index.html               — single-page shell, 5 focused sections
 styles.css               — all styles
 app.js                   — everything (~3000 lines): state, renders, AI, 3D viewer, SolidWorks bridge
 
@@ -51,14 +51,14 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=14) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=15) to force GitHub Pages cache bust.
 
 ---
 
 ## Architecture: how app.js works
 
 - Global `state` object — serialized to `localStorage` key `solidworks-ai-cad-studio-v4`
-- `render()` redraws all 4 panels by setting innerHTML
+- `render()` redraws all 5 panels by setting innerHTML
 - `persist(label)` = `saveOnly()` + `render()` + toast
 - `saveOnly()` = direct `localStorage.setItem` without render (used by live sliders)
 - `syncDraftFromDom()` — reads all form fields into state before any action
@@ -125,7 +125,7 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 
 | Feature | Reality |
 |---------|---------|
-| FEA / "Run simulation" | Local formula estimate. Buttons removed from UI — only results shown in specs if bridge returns them |
+| FEA / "Run simulation" | Dedicated FEA panel. Uses `/api/simulate` through the bridge when available, otherwise falls back to a local screening estimate |
 | Optimize | Local rule-based suggestions |
 | Material/LCA | Local lookup table |
 | Run agents | Local status strings |
@@ -184,6 +184,13 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Copilot image idea upload added**: the AI Copilot panel accepts image references, extracts contour profiles, lists image idea summaries, and passes them into AI payloads as visual/guide-curve context.
 - **Design intent requirements section added**: Requirements & Standards now shows parsed requirements, inferred family/material, image idea count, and intent-matched standards based on the Copilot design intent before generation.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=14`.
+- **Major five-section UI cleanup**: app now centers on AI input/uploads, legal standards/requirements, parameter sliders, CAD/SolidWorks output, and FEA.
+- **Uploads consolidated into AI input**: prompt, idea images, requirement files, and parameter spreadsheets are now in the AI panel; provider settings are collapsed.
+- **Standards panel simplified**: requirements and matched legal/standards guidance are displayed without geometry controls or CAD actions mixed in.
+- **Parameter section rebuilt**: product type, seed variants, bottle sliders, generic parameter sliders, design table export, and current model specs live together.
+- **CAD section simplified**: preview is primary; SolidWorks push, macro export, design-table export, and preview refresh are the main actions; bridge/server/cloud settings are collapsed.
+- **FEA panel restored**: run simulation and suggest geometry updates are visible again with safety factor, mass index, source, and recommendation readouts.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=15`.
 
 ---
 
