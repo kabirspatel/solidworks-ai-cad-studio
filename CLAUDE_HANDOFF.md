@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest commit:** pending current commit (v=12)
+**Latest pushed version:** v=12 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -315,7 +315,7 @@ You are continuing work on SolidWorks AI CAD Studio.
 
 Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
-Latest commit: pending current commit (v=12 in index.html)
+Latest pushed version: v=12 in index.html (use `git log -1 --oneline` for the current hash)
 
 Read CLAUDE_HANDOFF.md first for full current state, what works, and what needs to be done.
 
