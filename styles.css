@@ -334,6 +334,58 @@ textarea {
   font-size: 12px;
 }
 
+.helper-text {
+  margin: 5px 0 0;
+  color: var(--quiet);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.idea-upload,
+.intent-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.idea-list,
+.intent-list {
+  display: grid;
+  gap: 6px;
+}
+
+.idea-card,
+.intent-list div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+}
+
+.idea-card b,
+.intent-list b {
+  color: var(--tool);
+  font-size: 11px;
+}
+
+.idea-card span,
+.intent-list span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.intent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .upload-list,
 .mini-list {
   display: grid;
@@ -518,6 +570,38 @@ textarea {
   height: 100% !important;
 }
 
+.preview-telemetry {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preview-stat {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
+.preview-stat span {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.preview-stat strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
 .bridge-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -673,6 +757,7 @@ td code {
   .model-tools,
   .cloud-panel .field-row,
   .bridge-strip,
+  .preview-telemetry,
   .intake-grid,
   .agent-grid,
   .field-row,

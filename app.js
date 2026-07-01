@@ -1267,6 +1267,42 @@ function buildModelBlueprint(prompt, requirementText, selectedTemplate) {
   };
 }
 
+function deriveDesignIntent() {
+  const combined = `${state.prompt || ""}\n${state.requirementText || ""}`.trim();
+  const family = inferFamily(combined, state.selectedTemplate);
+  const library = CAD_LIBRARY[family] || CAD_LIBRARY.assembly;
+  const material = extractMaterial(combined, state.concept?.material || library.defaultMaterial || "");
+  const requirements = extractRequirements(combined);
+  const features = buildFeatures(library.features || [], combined);
+  const standards = matchStandards(family, material);
+  return {
+    combined,
+    family,
+    familyLabel: library.label,
+    material,
+    requirements,
+    features,
+    standards
+  };
+}
+
+function imageIdeaSummary() {
+  const images = state.geometry?.images || [];
+  if (!images.length) return [];
+  return images.map(image => {
+    const widths = (image.profile || []).map(point => Number(point.width)).filter(Number.isFinite);
+    const widest = widths.length ? Math.max(...widths) : 0;
+    const narrowest = widths.length ? Math.min(...widths) : 0;
+    return {
+      name: image.name,
+      confidence: image.confidence,
+      dimensions: `${image.originalWidth}x${image.originalHeight}`,
+      contourPoints: image.profile?.length || 0,
+      silhouette: widest && narrowest ? `width ratio ${round(widest / Math.max(narrowest, 0.01), 2)}` : "contour pending"
+    };
+  });
+}
+
 function syncDraftFromDom() {
   const prompt = document.getElementById("promptInput");
   const requirements = document.getElementById("requirementText");
@@ -1336,6 +1372,7 @@ function makeCurrentModelPayload() {
     concept: state.concept,
     parameters: state.parameters.map(({ key, label, unit, value, source, swDimension }) => ({ key, label, unit, value, source, swDimension })),
     imageGeometry: state.geometry,
+    imageIdeas: imageIdeaSummary(),
     designTable: state.designTable,
     analysis: state.analysis,
     agents: state.agents,
@@ -1383,8 +1420,9 @@ function generateModel() {
 }
 
 function lookupStandards() {
-  const family = state.concept?.family || inferFamily(`${state.prompt} ${state.requirementText}`, state.selectedTemplate);
-  const material = state.concept?.material || extractMaterial(`${state.prompt} ${state.requirementText}`, "");
+  const intent = deriveDesignIntent();
+  const family = intent.family || state.concept?.family || "assembly";
+  const material = intent.material || state.concept?.material || "";
   const matched = matchStandards(family, material);
   state.standards = state.standards || {};
   state.standards.matched = matched;
@@ -1472,8 +1510,7 @@ function applyBottleMorphPercent(pct, fam = state._bottleMorph?.family || bottle
   applyMorphedVariant(morphed, "Morph");
   if (options.bumpRevision) state.revision += 1;
   state.bridge.activeDocument = `${sanitizeFilename(state.concept.title)}.SLDPRT`;
-  state.designTable.rows = buildDesignTableRows();
-  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  syncModelDerivedState();
   state.analysis.simulation = null;
   state.analysis.optimization = null;
 }
@@ -1642,6 +1679,7 @@ function makeAiInstruction() {
     '  "agents": [{"key":"design","label":"Design","status":"Ready","result":"summary"}]',
     "}",
     "Use imageGeometry profiles as guide-curve inputs when available.",
+    "Use imageIdeas summaries as visual inspiration and cite which uploaded references influenced the model.",
     "Use designTable rows as SolidWorks dimension mappings when available.",
     "Keep parameters numeric and use millimeters unless another unit is required."
   ];
@@ -2307,6 +2345,7 @@ function renderCopilot() {
   const geminiKeyStored = Boolean(sessionStorage.getItem(SESSION_GEMINI_KEY));
   const claudeKeyStored = Boolean(sessionStorage.getItem(SESSION_CLAUDE_KEY));
   const openaiKeyStored = Boolean(sessionStorage.getItem(SESSION_AI_KEY));
+  const imageIdeas = imageIdeaSummary();
   const modelDefault = state.ai.mode === "gemini" ? "gemini-2.0-flash"
     : state.ai.mode === "claude" ? "claude-sonnet-4-6"
     : state.ai.mode === "openai" ? "gpt-4o-mini"
@@ -2327,6 +2366,25 @@ function renderCopilot() {
         <div>
           <label for="promptInput">Design intent</label>
           <textarea id="promptInput" placeholder="Describe what you need — material, size, constraints, style…">${escapeHtml(state.prompt)}</textarea>
+        </div>
+        <div class="idea-upload">
+          <div class="standards-header">
+            <label for="ideaImageFiles">Idea images</label>
+            <span class="badge ${imageIdeas.length ? "good" : ""}">${imageIdeas.length ? `${imageIdeas.length} loaded` : "optional"}</span>
+          </div>
+          <input id="ideaImageFiles" type="file" accept="image/*" multiple>
+          <p class="helper-text">Upload sketches, references, or contours. The copilot converts them into guide-curve summaries for the next model generation.</p>
+          ${state.geometry?.lastMessage ? `<p class="helper-text">${escapeHtml(state.geometry.lastMessage)}</p>` : ""}
+          ${imageIdeas.length ? `
+            <div class="idea-list">
+              ${imageIdeas.map(image => `
+                <div class="idea-card">
+                  <b>${escapeHtml(image.name)}</b>
+                  <span>${escapeHtml(image.dimensions)} · ${image.contourPoints} contour pts · ${image.confidence}% confidence · ${escapeHtml(image.silhouette)}</span>
+                </div>
+              `).join("")}
+            </div>
+          ` : ""}
         </div>
         <div class="field-row">
           <div>
@@ -2602,6 +2660,51 @@ function bottleSurfaceLabel(design = currentBottleDesign()) {
   if (Number(design.facetCount)) parts.push(`${Math.round(design.facetCount)} facets`);
   if (Number(design.helixRidges)) parts.push(`${Math.round(design.helixRidges)} helix ribs`);
   return parts.join(" + ") || "smooth";
+}
+
+function syncModelDerivedState(message = "") {
+  state.designTable.rows = buildDesignTableRows();
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  if (state.concept.family === "bottle") {
+    const design = currentBottleDesign();
+    state.concept.features = [...new Set([...(state.concept.features || []), bottleSurfaceLabel(design)])].filter(Boolean).slice(0, 8);
+    state.geometry.lastMessage = `Live CAD preview: ${round(design.height, 0)} x ${round(design.bodyDiameter, 1)} x ${round(design.bodyDepth, 1)} mm, ${bottleSurfaceLabel(design)}`;
+  }
+  if (message) state.bridge.lastMessage = message;
+}
+
+function previewTelemetryItems() {
+  if (state.concept.family === "bottle") {
+    const design = currentBottleDesign();
+    return [
+      ["Envelope", `${round(design.height, 0)} x ${round(design.bodyDiameter, 1)} x ${round(design.bodyDepth, 1)} mm`],
+      ["Surface", bottleSurfaceLabel(design)],
+      ["Overflow", `${round(bottleEstimatedOverflow(design), 0)} ml`],
+      ["Preview", state.cadServer?.url ? (state.cadServer.status || "Geometry server") : "Live browser mesh"]
+    ];
+  }
+  const length = getParameter("length", getParameter("baseLength", getParameter("bodyDiameter", 0)));
+  const width = getParameter("width", getParameter("baseWidth", getParameter("bodyDepth", 0)));
+  const height = getParameter("height", getParameter("legHeight", getParameter("depth", 0)));
+  return [
+    ["Envelope", [length, width, height].filter(Boolean).map(v => round(v, 1)).join(" x ") || "Pending"],
+    ["Feature", state.concept.features?.[0] || state.concept.familyLabel || "Parametric"],
+    ["Parameters", `${state.parameters.length} linked specs`],
+    ["Preview", state.cadServer?.url ? (state.cadServer.status || "Geometry server") : "Live browser mesh"]
+  ];
+}
+
+function renderPreviewTelemetry() {
+  return `<div class="preview-telemetry" id="previewTelemetry">
+    ${previewTelemetryItems().map(([label, value]) => `
+      <div class="preview-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+    `).join("")}
+  </div>`;
+}
+
+function refreshPreviewTelemetry() {
+  const slot = document.getElementById("previewTelemetry");
+  if (slot) slot.outerHTML = renderPreviewTelemetry();
 }
 
 function fmtSliderVal(cfg, val) {
@@ -2880,10 +2983,15 @@ function renderBottleSliders() {
 }
 
 function renderRequirements() {
-  const matchedStandards = state.standards?.matched || [];
-  const selectedStandards = state.standards?.selected || [];
-  const activeConstraints = buildStandardsConstraints();
-  const labelText = buildStandardsLabelText();
+  const intent = deriveDesignIntent();
+  const imageIdeas = imageIdeaSummary();
+  const matchedStandards = state.standards?.matched?.length ? state.standards.matched : intent.standards;
+  let selectedStandards = state.standards?.selected?.length ? state.standards.selected : matchedStandards.map(std => std.id);
+  if (!matchedStandards.some(std => selectedStandards.includes(std.id))) selectedStandards = matchedStandards.map(std => std.id);
+  const activeStandards = matchedStandards.filter(std => selectedStandards.includes(std.id));
+  const activeConstraints = activeStandards.flatMap(std => std.constraints || []).map(c => `- ${c.param}: ${c.rule}`);
+  const labelText = [...new Set(activeStandards.map(std => std.labelRequired).filter(Boolean))].join("; ");
+  const intentRequirements = intent.requirements.length ? intent.requirements : (intent.combined ? [`Model intent: ${intent.combined.slice(0, 180)}${intent.combined.length > 180 ? "..." : ""}`] : []);
 
   document.getElementById("requirementsPanel").innerHTML = `
     <div class="panel-header">
@@ -2895,6 +3003,29 @@ function renderRequirements() {
     </div>
     <div class="panel-body fill-panel">
       <div class="field-grid">
+
+        <section class="intent-section">
+          <div class="standards-header">
+            <label>Design intent map</label>
+            <button class="button ghost" data-action="lookup-standards">Sync standards</button>
+          </div>
+          <div class="intent-chips">
+            <span class="chip">Family: ${escapeHtml(intent.familyLabel)}</span>
+            <span class="chip">Material: ${escapeHtml(intent.material || "Not specified")}</span>
+            <span class="chip">Standards: ${matchedStandards.length}</span>
+            <span class="chip">Images: ${imageIdeas.length}</span>
+          </div>
+          ${intentRequirements.length ? `
+            <div class="intent-list">
+              ${intentRequirements.slice(0, 6).map(item => `<div><b>Requirement</b><span>${escapeHtml(item)}</span></div>`).join("")}
+            </div>
+          ` : `<p class="standards-empty">Type a design intent in AI Copilot to populate requirements, standards, and material gates here.</p>`}
+          ${imageIdeas.length ? `
+            <div class="intent-list">
+              ${imageIdeas.map(image => `<div><b>Image idea</b><span>${escapeHtml(image.name)}: ${image.contourPoints} contour points, ${image.confidence}% confidence, ${escapeHtml(image.silhouette)}</span></div>`).join("")}
+            </div>
+          ` : ""}
+        </section>
 
         <div class="field-row">
           <div>
@@ -3044,6 +3175,8 @@ function renderModel() {
           `}
         </div>
       </div>
+
+      ${renderPreviewTelemetry()}
 
       ${state.cloud.spaceUrl && state.cloud.spaceUrl !== "https://my.3dexperience.3ds.com/" ? `
       <div style="padding:8px 0 4px;display:flex;gap:8px;align-items:center">
@@ -3400,7 +3533,7 @@ function addMeshToScene(geom, ctx) {
   controls.update();
 }
 
-function mount3DViewer() {
+function mount3DViewer(options = {}) {
   const container = document.getElementById("threeViewport");
   if (!container) return;
   if (typeof THREE === "undefined") {
@@ -3416,7 +3549,7 @@ function mount3DViewer() {
 
   const serverUrl = state.cadServer?.url?.trim();
 
-  if (serverUrl && state.parameters.length) {
+  if (serverUrl && state.parameters.length && !options.forceLocal) {
     // ── fetch real STL from geometry server ──
     container.style.cursor = "wait";
     fetch(`${serverUrl}/api/generate`, {
@@ -3431,17 +3564,21 @@ function mount3DViewer() {
         addMeshToScene(geom, _three);
         container.style.cursor = "";
         state.cadServer.status = "Loaded";
+        refreshPreviewTelemetry();
       })
       .catch(err => {
         container.style.cursor = "";
         state.cadServer.status = `Error: ${err.message}`;
         // Fall back to parametric geometry
         addMeshToScene(build3DGeometry(state.concept.family, state.parameters), _three);
+        refreshPreviewTelemetry();
       });
   } else {
     // ── parametric fallback (no server configured) ──
     if (state.parameters.length || state.concept.family) {
       addMeshToScene(build3DGeometry(state.concept.family, state.parameters), _three);
+      state.cadServer.status = options.forceLocal && serverUrl ? "Live local preview" : state.cadServer.status;
+      refreshPreviewTelemetry();
     }
   }
 }
@@ -3491,6 +3628,17 @@ document.addEventListener("click", event => {
 
 // ── bottle slider live input ──────────────────────────────────────────────────
 document.addEventListener("input", event => {
+  if (event.target.id === "promptInput") {
+    state.prompt = event.target.value.trim();
+    saveOnly();
+    renderRequirements();
+    return;
+  }
+  if (event.target.id === "requirementText") {
+    state.requirementText = event.target.value.trim();
+    saveOnly();
+    return;
+  }
   const bslKey = event.target.dataset?.bsl;
   if (bslKey) {
     const cfg = BOTTLE_SLIDER_CONFIG.find(c => c.key === bslKey);
@@ -3498,11 +3646,13 @@ document.addEventListener("input", event => {
     let val = Number(event.target.value);
     if (cfg.integer) val = Math.round(val);
     setBottleParam(bslKey, val);
+    syncModelDerivedState("Slider updated CAD preview");
     const lbl = document.getElementById("bslv-" + bslKey);
     if (lbl) lbl.textContent = fmtSliderVal(cfg, val);
     saveOnly();
     renderSpecs();
-    requestAnimationFrame(mount3DViewer);
+    refreshPreviewTelemetry();
+    requestAnimationFrame(() => mount3DViewer({ forceLocal: true }));
     return;
   }
   if (event.target.id === "bslMorphPct") {
@@ -3526,7 +3676,8 @@ document.addEventListener("input", event => {
     }
     saveOnly();
     renderSpecs();
-    requestAnimationFrame(mount3DViewer);
+    refreshPreviewTelemetry();
+    requestAnimationFrame(() => mount3DViewer({ forceLocal: true }));
     return;
   }
   if (event.target.id === "bslStepCount") {
@@ -3544,6 +3695,7 @@ document.addEventListener("input", event => {
 document.addEventListener("change", event => {
   if (event.target.id === "requirementFiles") handleRequirementUpload(event.target.files);
   if (event.target.id === "imageFiles") handleImageUpload(event.target.files);
+  if (event.target.id === "ideaImageFiles") handleImageUpload(event.target.files);
   if (event.target.id === "tableFiles") handleTableUpload(event.target.files);
   if (event.target.id === "variantSelect" && event.target.value) {
     loadBottleVariant(event.target.value);
@@ -3561,6 +3713,8 @@ document.addEventListener("change", event => {
     const id = event.target.dataset.standardId;
     if (!id) return;
     state.standards = state.standards || { matched: [], selected: [] };
+    if (!state.standards.matched?.length) state.standards.matched = deriveDesignIntent().standards;
+    if (!state.standards.selected?.length) state.standards.selected = state.standards.matched.map(std => std.id);
     if (event.target.checked) {
       if (!state.standards.selected.includes(id)) state.standards.selected = [...state.standards.selected, id];
     } else {

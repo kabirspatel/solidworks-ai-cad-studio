@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=13 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=14 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=13) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=14) to force GitHub Pages cache bust.
 
 ---
 
@@ -180,6 +180,10 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Bottle sketch features made functional**: the sample `preview (1).html` morph step-count slider, generated n-step morph strip, 5x5 seed matrix, reset-to-nearest-seed flow, feature-option list, code gates, live bottle metrics, SolidWorks surface-logic text, and n-step CSV export are now integrated into the dashboard.
 - **Surface sliders now affect geometry**: ribs, rings, facets, helix ridges, and oval body depth deform the Three.js fallback mesh and the `cad-server` STL mesh instead of only changing text values.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=13`.
+- **CAD preview reacts more clearly to sliders**: slider changes now refresh design-table rows, material assessment, live preview telemetry, specs, and the browser mesh immediately without waiting on a configured geometry server.
+- **Copilot image idea upload added**: the AI Copilot panel accepts image references, extracts contour profiles, lists image idea summaries, and passes them into AI payloads as visual/guide-curve context.
+- **Design intent requirements section added**: Requirements & Standards now shows parsed requirements, inferred family/material, image idea count, and intent-matched standards based on the Copilot design intent before generation.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=14`.
 
 ---
 
@@ -312,7 +316,7 @@ You are continuing work on SolidWorks AI CAD Studio.
 
 Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
-Latest pushed version: v=13 in index.html (use `git log -1 --oneline` for the current hash)
+Latest pushed version: v=14 in index.html (use `git log -1 --oneline` for the current hash)
 
 Read CLAUDE_HANDOFF.md first for full current state, what works, and what needs to be done.
 
@@ -336,5 +340,5 @@ Highest priority next tasks:
 4. Add morph-slider parameter locks so manual slider edits are not overwritten
 5. Extend the SolidWorks bridge/native host so launch, rebuild, export, drawing, and rendering buttons call real Windows SolidWorks APIs
 
-Bump ?v=N in index.html after each significant change (currently v=13).
+Bump ?v=N in index.html after each significant change (currently v=14).
 ```
