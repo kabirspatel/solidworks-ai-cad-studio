@@ -932,7 +932,8 @@ td code {
 }
 
 input[type="range"].bsl-input,
-#bslMorphPct {
+#bslMorphPct,
+#bslStepCount {
   width: 100%;
   accent-color: var(--tool);
   height: 4px;
@@ -985,4 +986,278 @@ input[type="range"].bsl-input,
   color: var(--muted);
   font-size: 10px;
   line-height: 1.3;
+}
+
+.bsl-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.bottle-strip {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px 0 9px;
+  scrollbar-width: thin;
+}
+
+.bottle-card,
+.bottle-tile {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: none;
+}
+
+.bottle-card {
+  display: grid;
+  flex: 0 0 112px;
+  gap: 5px;
+  padding: 6px;
+}
+
+.bottle-card:hover,
+.bottle-tile:hover,
+.bottle-card.active,
+.bottle-tile.active {
+  border-color: var(--tool);
+  background: #f3f8f6;
+}
+
+.bottle-card svg,
+.bottle-tile svg {
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(205, 214, 211, .7);
+  border-radius: 6px;
+  background: linear-gradient(180deg, #fff, #f4f7f5);
+}
+
+.bottle-card span,
+.bottle-tile span,
+.bottle-tile em {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.bottle-card b,
+.bottle-tile b {
+  display: block;
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.bottle-matrix,
+.bottle-feature-options {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.bottle-matrix summary,
+.bottle-feature-options summary,
+.formula-details summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bottle-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 7px;
+  max-height: 520px;
+  overflow: auto;
+  padding-top: 8px;
+}
+
+.bottle-tile {
+  display: grid;
+  gap: 5px;
+  padding: 6px;
+}
+
+.bottle-tile em {
+  font-style: normal;
+  color: var(--quiet);
+}
+
+.feature-option-grid {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.feature-option {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
+.feature-option b {
+  font-size: 11px;
+}
+
+.feature-option span,
+.feature-option em {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.feature-option em {
+  font-style: normal;
+  color: var(--quiet);
+}
+
+.bottle-gates {
+  display: grid;
+  gap: 10px;
+}
+
+.bottle-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.bottle-metric {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
+.bottle-metric small {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.bottle-metric b {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.bottle-metric span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.bottle-checks {
+  display: grid;
+  gap: 6px;
+}
+
+.bottle-check {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+}
+
+.bottle-check > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.bottle-check.pass > span,
+.bottle-check.locked > span {
+  color: var(--ok);
+  background: #e6f1eb;
+}
+
+.bottle-check.adjust > span {
+  color: var(--warn);
+  background: #f5eddd;
+}
+
+.bottle-check.disabled > span {
+  color: var(--bad);
+  background: #f5e7e5;
+}
+
+.bottle-check b {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.bottle-check p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.formula-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+  padding: 8px;
+}
+
+.formula-details pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  color: #dcebe6;
+  background: #172225;
+  border-radius: 6px;
+  padding: 10px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.code-gate-list {
+  display: grid;
+  gap: 7px;
+  padding-top: 8px;
+}
+
+.code-gate-list div {
+  display: grid;
+  gap: 2px;
+}
+
+.code-gate-list b {
+  font-size: 11px;
+}
+
+.code-gate-list span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
 }

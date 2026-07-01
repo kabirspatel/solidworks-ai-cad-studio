@@ -335,6 +335,46 @@ const BOTTLE_LOCKS = [
   ["Material",     "PLA + enzyme additive system"],
 ];
 
+const BOTTLE_LOCK_VALUES = {
+  targetFillMl: 500,
+  overflowTargetMl: 530,
+  overflowToleranceMl: 10,
+  neckFinishOdMm: 28,
+  mouthIdMm: 21,
+  threadPitchMm: 3,
+  neckHeightMm: 25,
+  capOdMm: 32,
+  capHeightMm: 18,
+  capIdMm: 28.8,
+  minBaseMm: 1.4,
+  material: "PLA + enzyme additive system",
+  capMaterial: "PLA / CPLA cap with linerless plug seal"
+};
+
+const BOTTLE_FEATURE_OPTIONS = [
+  ["Body ridges", "Horizontal rings", "Vertical ribs", "Flowing wave ribs", "Increase stiffness and top-load strength"],
+  ["Grip area", "Shallow grooves", "Deep grooves", "Wave-textured grip zone", "Improve handling"],
+  ["Shoulder ridges", "None", "2 rings", "Ripple rings", "Prevent paneling"],
+  ["Base geometry", "Smooth", "Radial ribs", "Radial wave pattern", "Load distribution and stability"],
+  ["Neck ridges", "Standard threads", "Decorative ring", "Ripple ring", "Cap retention"],
+  ["Vertical rib pattern", "Straight ribs", "Tapered ribs", "Stream-inspired curved ribs", "Improve sidewall stiffness"],
+  ["Rib spacing", "Wide spacing", "Medium spacing", "Variable spacing", "Balance strength and material use"],
+  ["Rib depth", "Shallow (0.5 mm)", "Medium (1.0 mm)", "Deep (1.5 mm)", "Structural reinforcement"],
+  ["Label interface", "Full-wrap label", "Partial label panel", "Embossed logo area", "Ensure readability"],
+  ["Material appearance", "Fully transparent", "Slight blue tint", "Slight green tint", "Product differentiation"],
+  ["Cap color", "White", "Deep teal", "Matte seafoam", "Product differentiation"]
+];
+
+const BOTTLE_CODE_GATES = [
+  ["Bottled water identity / quality", "21 CFR §165.110", "Bottle must hold water intended for human consumption; product and claims must match bottled-water identity and quality requirements."],
+  ["Bottled drinking water CGMP", "21 CFR Part 129", "Container sanitation, bottling, lot/date coding, process controls, and inspection records remain release gates beyond CAD."],
+  ["Net quantity labeling", "21 CFR §101.7", "PDP must carry net quantity; reserve label panel for 16.9 fl oz (500 mL)."],
+  ["Food-contact material clearance", "FDA FCS / FCN logic", "PLA, enzyme additive, colorant, cap, plug/liner, ink, and adhesive require food-contact status review or migration package."],
+  ["EU food-contact plastics", "Commission Regulation (EU) No 10/2011", "EU launch requires migration and Declaration of Compliance review for plastic food-contact articles."],
+  ["Environmental claims", "16 CFR Part 260 / FTC Green Guides", "Compostable, biodegradable, or recyclable claims stay disabled unless substantiated for the finished package and sales market."],
+  ["Compostability test target", "ASTM D6400 / EN 13432", "Enable compostable language only after finished bottle/cap/label system certification or equivalent substantiation."]
+];
+
 const AGENT_LANES = [
   { key: "design", label: "Design", role: "Generate geometry options and feature logic." },
   { key: "standards", label: "Standards", role: "Check requirements, manufacturing rules, and constraints." },
@@ -1366,6 +1406,7 @@ function loadBottleVariant(variantId) {
   const variant = BOTTLE_VARIANTS.find(v => v.id === variantId);
   if (!variant) { showToast("Variant not found"); return; }
   const library = CAD_LIBRARY.bottle;
+  const existingSteps = state._bottleMorph?.steps || 5;
   state.concept = {
     family: "bottle",
     familyLabel: library.label,
@@ -1387,12 +1428,15 @@ function loadBottleVariant(variantId) {
     { key: "superellipseN", label: "Superellipse n", unit: "",      value: variant.supN,        source: "Variant", swDimension: "D11@SUPERELLIPSE_N",aliases: [] },
     { key: "ribCount",      label: "Rib count",      unit: "count", value: variant.ribCount,    source: "Variant", swDimension: "D12@RIB_COUNT",    aliases: [] },
     { key: "ribDepth",      label: "Rib depth",      unit: "mm",    value: variant.ribDepth,    source: "Variant", swDimension: "D13@RIB_DEPTH",    aliases: [] },
+    { key: "ringCount",     label: "Ring count",     unit: "count", value: variant.ringCount || 0, source: "Variant", swDimension: "D19@RING_COUNT", aliases: [] },
+    { key: "ringDepth",     label: "Ring depth",     unit: "mm",    value: variant.ringDepth || 0, source: "Variant", swDimension: "D20@RING_DEPTH", aliases: [] },
     { key: "facetCount",    label: "Facet count",    unit: "count", value: variant.facetCount,  source: "Variant", swDimension: "D14@FACET_COUNT",  aliases: [] },
     { key: "facetDepth",    label: "Facet depth",    unit: "mm",    value: variant.facetDepth,  source: "Variant", swDimension: "D15@FACET_DEPTH",  aliases: [] },
     { key: "helixRidges",   label: "Helix ridges",   unit: "count", value: variant.helixCount,  source: "Variant", swDimension: "D16@HELIX_RIDGES", aliases: [] },
     { key: "helixDepth",    label: "Helix depth",    unit: "mm",    value: variant.helixDepth,  source: "Variant", swDimension: "D17@HELIX_DEPTH",  aliases: [] },
     { key: "helixTurns",    label: "Helix turns",    unit: "",      value: variant.helixTurns,  source: "Variant", swDimension: "D18@HELIX_TURNS",  aliases: [] }
   ];
+  state._bottleMorph = { family: variant.morph, pct: bottleVariantPct(variant), activeId: variant.id, steps: existingSteps };
   state.prompt = `Variant ${variant.id}: ${variant.concept} (morph ${variant.morph})`;
   state.requirementText = [
     `Variant: ${variant.id} — ${variant.concept}`,
@@ -1408,6 +1452,96 @@ function loadBottleVariant(variantId) {
   state.analysis.simulation = null;
   state.analysis.optimization = null;
   lookupStandards();
+}
+
+function applyBottleMorphPercent(pct, fam = state._bottleMorph?.family || bottleFamilies()[0], options = {}) {
+  const existingSteps = state._bottleMorph?.steps || 5;
+  const clampedPct = clamp(Number(pct), 0, 100);
+  const design = bottleDesignFromMorph(fam, clampedPct);
+  const morphed = morphBottleAtPct(fam, clampedPct);
+  if (!morphed) return;
+  state.concept = {
+    ...state.concept,
+    family: "bottle",
+    familyLabel: CAD_LIBRARY.bottle.label,
+    title: `${bottleFamilyLabel(fam)} @ ${Math.round(clampedPct)}%`,
+    material: state.concept.material || CAD_LIBRARY.bottle.defaultMaterial || BOTTLE_LOCK_VALUES.material,
+    features: [...new Set([...(state.concept.features || CAD_LIBRARY.bottle.features), "Morph strip", bottleSurfaceLabel(design)])]
+  };
+  state._bottleMorph = { family: fam, pct: clampedPct, activeId: "", steps: existingSteps };
+  applyMorphedVariant(morphed, "Morph");
+  if (options.bumpRevision) state.revision += 1;
+  state.bridge.activeDocument = `${sanitizeFilename(state.concept.title)}.SLDPRT`;
+  state.designTable.rows = buildDesignTableRows();
+  state.analysis.material = buildMaterialAssessment(state.concept.material, state.parameters);
+  state.analysis.simulation = null;
+  state.analysis.optimization = null;
+}
+
+function resetBottleToNearestSeed() {
+  const seed = nearestBottleVariantFromParams(currentBottleDesign());
+  loadBottleVariant(seed.id);
+}
+
+function bottleDesignParameters(design) {
+  return BOTTLE_SLIDER_CONFIG.map(cfg => ({
+    key: cfg.key,
+    label: cfg.label,
+    value: design[cfg.key],
+    unit: cfg.unit,
+    swDimension: cfg.swKey
+  }));
+}
+
+function bottleMorphCsv() {
+  const steps = bottleGeneratedSteps();
+  const headers = [
+    "configuration",
+    "morphFamily",
+    "stepPercent",
+    "estimatedOverflowMl",
+    "recommendedBodyScale",
+    "material",
+    ...BOTTLE_SLIDER_CONFIG.map(cfg => cfg.swKey)
+  ];
+  const escapeCell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const rows = steps.map((design, index) => [
+    `${sanitizeFilename(design.morph).replace(/-/g, "")}-${String(index + 1).padStart(2, "0")}`,
+    design.morph,
+    Math.round(design.pct),
+    round(bottleEstimatedOverflow(design), 1),
+    round(bottleRecommendedScale(design), 3),
+    design.material || BOTTLE_LOCK_VALUES.material,
+    ...BOTTLE_SLIDER_CONFIG.map(cfg => {
+      const value = design[cfg.key];
+      return cfg.integer ? Math.round(Number(value || 0)) : round(value || 0, cfg.step < 0.05 ? 2 : 2);
+    })
+  ]);
+  return [headers, ...rows].map(row => row.map(escapeCell).join(",")).join("\n");
+}
+
+function exportBottleMorphCsv() {
+  const fam = state._bottleMorph?.family || bottleFamilies()[0];
+  downloadText(`${sanitizeFilename(fam)}-bottle-morph-steps.csv`, bottleMorphCsv(), "text/csv");
+  showToast("Bottle n-step morph CSV exported");
+}
+
+function exportBottleActiveJson() {
+  const design = currentBottleDesign();
+  const payload = {
+    ...makeCurrentModelPayload(),
+    bottleDesign: {
+      ...design,
+      estimatedOverflowMl: round(bottleEstimatedOverflow(design), 1),
+      recommendedBodyScale: round(bottleRecommendedScale(design), 3),
+      lockedControls: BOTTLE_LOCK_VALUES,
+      codeGates: BOTTLE_CODE_GATES,
+      featureOptions: BOTTLE_FEATURE_OPTIONS
+    },
+    solidWorksSurfaceLogic: bottleFormulaText(design)
+  };
+  downloadText(`${sanitizeFilename(state.concept.title || "bottle-design")}-bottle-payload.json`, JSON.stringify(payload, null, 2), "application/json");
+  showToast("Bottle JSON payload exported");
 }
 
 function applyParameterChanges() {
@@ -2257,18 +2391,37 @@ function getBottleParam(key) {
   return p != null ? p.value : null;
 }
 
-function setBottleParam(key, val) {
+function bottleFamilies() {
+  return [...new Set(BOTTLE_VARIANTS.map(v => v.morph))];
+}
+
+function bottleFamilySeeds(famKey) {
+  return BOTTLE_VARIANTS.filter(v => v.morph === famKey)
+    .sort((a, b) => parseInt(a.id.slice(1)) - parseInt(b.id.slice(1)));
+}
+
+function bottleFamilyLabel(famKey) {
+  return BOTTLE_MORPH_FAMILIES[famKey] || famKey;
+}
+
+function bottleVariantPct(variant) {
+  const seeds = bottleFamilySeeds(variant.morph);
+  const index = seeds.findIndex(v => v.id === variant.id);
+  if (index <= 0) return 0;
+  return Math.round((index / Math.max(1, seeds.length - 1)) * 100);
+}
+
+function setBottleParam(key, val, source = "Slider") {
   const p = state.parameters.find(p => p.key === key);
-  if (p) { p.value = val; p.source = "Slider"; }
+  if (p) { p.value = val; p.source = source; }
   else {
     const cfg = BOTTLE_SLIDER_CONFIG.find(c => c.key === key);
-    if (cfg) state.parameters.push({ key, label: cfg.label, unit: cfg.unit, value: val, source: "Slider", swDimension: cfg.swKey, aliases: [] });
+    if (cfg) state.parameters.push({ key, label: cfg.label, unit: cfg.unit, value: val, source, swDimension: cfg.swKey, aliases: [] });
   }
 }
 
 function morphBottleAtPct(famKey, pct) {
-  const seeds = BOTTLE_VARIANTS.filter(v => v.morph === famKey)
-    .sort((a, b) => parseInt(a.id.slice(1)) - parseInt(b.id.slice(1)));
+  const seeds = bottleFamilySeeds(famKey);
   if (!seeds.length) return null;
   const t = pct / 100;
   const a = seeds[0], b = seeds[seeds.length - 1];
@@ -2291,7 +2444,7 @@ function morphBottleAtPct(famKey, pct) {
   };
 }
 
-function applyMorphedVariant(morphed) {
+function applyMorphedVariant(morphed, source = "Morph") {
   if (!morphed) return;
   const map = {
     height:"H", bodyDiameter:"W", bodyDepth:"D", wall:"wall", base:"base",
@@ -2302,8 +2455,153 @@ function applyMorphedVariant(morphed) {
     helixRidges:"helixCount", helixDepth:"helixDepth", helixTurns:"helixTurns",
   };
   for (const [pk, mk] of Object.entries(map)) {
-    if (morphed[mk] !== undefined) setBottleParam(pk, morphed[mk]);
+    if (morphed[mk] !== undefined) setBottleParam(pk, morphed[mk], source);
   }
+}
+
+function bottleDesignFromVariant(variant) {
+  return {
+    id: variant.id,
+    concept: variant.concept,
+    morph: variant.morph,
+    pct: bottleVariantPct(variant),
+    height: Number(variant.H),
+    bodyDiameter: Number(variant.W),
+    bodyDepth: Number(variant.D),
+    wall: Number(variant.wall),
+    base: Number(variant.base),
+    neckDiameter: Number(variant.neckOD),
+    mouthDiameter: Number(variant.mouthID),
+    shoulderHeight: Number(variant.shoulderH),
+    neckHeight: Number(variant.neckH),
+    superellipseN: Number(variant.supN),
+    ribCount: Number(variant.ribCount || 0),
+    ribDepth: Number(variant.ribDepth || 0),
+    ringCount: Number(variant.ringCount || 0),
+    ringDepth: Number(variant.ringDepth || 0),
+    facetCount: Number(variant.facetCount || 0),
+    facetDepth: Number(variant.facetDepth || 0),
+    helixRidges: Number(variant.helixCount || 0),
+    helixDepth: Number(variant.helixDepth || 0),
+    helixTurns: Number(variant.helixTurns || 0),
+    material: state.concept.material || BOTTLE_LOCK_VALUES.material
+  };
+}
+
+function bottleDesignFromMorph(famKey, pct) {
+  const morphed = morphBottleAtPct(famKey, pct);
+  const seeds = bottleFamilySeeds(famKey);
+  const first = seeds[0] || BOTTLE_VARIANTS[0];
+  const last = seeds[seeds.length - 1] || first;
+  const near = pct < 50 ? first : last;
+  if (!morphed) return bottleDesignFromVariant(near);
+  return {
+    ...bottleDesignFromVariant(near),
+    id: `${famKey.replace("→", "")}-${String(Math.round(pct)).padStart(3, "0")}`,
+    concept: `${bottleFamilyLabel(famKey)} morph`,
+    morph: famKey,
+    pct,
+    height: morphed.H,
+    bodyDiameter: morphed.W,
+    bodyDepth: morphed.D,
+    wall: morphed.wall,
+    base: morphed.base,
+    neckDiameter: morphed.neckOD,
+    mouthDiameter: morphed.mouthID,
+    shoulderHeight: morphed.shoulderH,
+    neckHeight: morphed.neckH,
+    superellipseN: morphed.supN,
+    ribCount: morphed.ribCount,
+    ribDepth: morphed.ribDepth,
+    ringCount: morphed.ringCount,
+    ringDepth: morphed.ringDepth,
+    facetCount: morphed.facetCount,
+    facetDepth: morphed.facetDepth,
+    helixRidges: morphed.helixCount,
+    helixDepth: morphed.helixDepth,
+    helixTurns: morphed.helixTurns
+  };
+}
+
+function currentBottleDesign() {
+  const variantId = state._bottleMorph?.activeId;
+  const seed = BOTTLE_VARIANTS.find(v => v.id === variantId) || nearestBottleVariantFromParams();
+  const fromSeed = seed ? bottleDesignFromVariant(seed) : bottleDesignFromVariant(BOTTLE_VARIANTS[0]);
+  const value = (key, fallback) => {
+    const raw = getBottleParam(key);
+    return raw == null ? fallback : Number(raw);
+  };
+  return {
+    ...fromSeed,
+    id: state._bottleMorph?.activeId || fromSeed.id || "CUSTOM",
+    concept: state.concept.title || fromSeed.concept,
+    morph: state._bottleMorph?.family || fromSeed.morph,
+    pct: Number(state._bottleMorph?.pct ?? fromSeed.pct ?? 0),
+    height: value("height", fromSeed.height),
+    bodyDiameter: value("bodyDiameter", fromSeed.bodyDiameter),
+    bodyDepth: value("bodyDepth", fromSeed.bodyDepth),
+    wall: value("wall", fromSeed.wall),
+    base: value("base", fromSeed.base),
+    neckDiameter: value("neckDiameter", fromSeed.neckDiameter),
+    mouthDiameter: value("mouthDiameter", fromSeed.mouthDiameter),
+    shoulderHeight: value("shoulderHeight", fromSeed.shoulderHeight),
+    neckHeight: value("neckHeight", fromSeed.neckHeight),
+    superellipseN: value("superellipseN", fromSeed.superellipseN),
+    ribCount: value("ribCount", fromSeed.ribCount),
+    ribDepth: value("ribDepth", fromSeed.ribDepth),
+    ringCount: value("ringCount", fromSeed.ringCount),
+    ringDepth: value("ringDepth", fromSeed.ringDepth),
+    facetCount: value("facetCount", fromSeed.facetCount),
+    facetDepth: value("facetDepth", fromSeed.facetDepth),
+    helixRidges: value("helixRidges", fromSeed.helixRidges),
+    helixDepth: value("helixDepth", fromSeed.helixDepth),
+    helixTurns: value("helixTurns", fromSeed.helixTurns),
+    material: state.concept.material || BOTTLE_LOCK_VALUES.material
+  };
+}
+
+function nearestBottleVariantFromParams(design = null) {
+  const d = design || {
+    height: Number(getBottleParam("height") || 0),
+    bodyDiameter: Number(getBottleParam("bodyDiameter") || 0),
+    bodyDepth: Number(getBottleParam("bodyDepth") || 0),
+    helixTurns: Number(getBottleParam("helixTurns") || 0)
+  };
+  let best = BOTTLE_VARIANTS[0];
+  let bestScore = Infinity;
+  for (const variant of BOTTLE_VARIANTS) {
+    const score =
+      Math.abs((variant.H || 0) - (d.height || 0)) +
+      Math.abs((variant.W || 0) - (d.bodyDiameter || 0)) +
+      Math.abs((variant.D || 0) - (d.bodyDepth || 0)) +
+      4 * Math.abs((variant.helixTurns || 0) - (d.helixTurns || 0));
+    if (score < bestScore) {
+      best = variant;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function bottleEstimatedOverflow(design = currentBottleDesign()) {
+  const seed = nearestBottleVariantFromParams(design);
+  const denom = Math.max(1, Number(seed.H) * Number(seed.W) * Number(seed.D));
+  const numer = Math.max(1, Number(design.height) * Number(design.bodyDiameter) * Number(design.bodyDepth));
+  return BOTTLE_LOCK_VALUES.overflowTargetMl * (numer / denom);
+}
+
+function bottleRecommendedScale(design = currentBottleDesign()) {
+  const overflow = bottleEstimatedOverflow(design);
+  return Math.sqrt(BOTTLE_LOCK_VALUES.overflowTargetMl / Math.max(1, overflow));
+}
+
+function bottleSurfaceLabel(design = currentBottleDesign()) {
+  const parts = [];
+  if (Number(design.ribCount)) parts.push(`${Math.round(design.ribCount)} ribs`);
+  if (Number(design.ringCount)) parts.push(`${Math.round(design.ringCount)} rings`);
+  if (Number(design.facetCount)) parts.push(`${Math.round(design.facetCount)} facets`);
+  if (Number(design.helixRidges)) parts.push(`${Math.round(design.helixRidges)} helix ribs`);
+  return parts.join(" + ") || "smooth";
 }
 
 function fmtSliderVal(cfg, val) {
@@ -2312,10 +2610,217 @@ function fmtSliderVal(cfg, val) {
   return `${Number(n).toFixed(decimals)}${cfg.unit ? " " + cfg.unit : ""}`;
 }
 
+function bottleStepCount() {
+  return clamp(Number(state._bottleMorph?.steps || 5), 3, 25);
+}
+
+function bottleSvg(design, options = {}) {
+  const W = options.w || 128;
+  const H = options.h || 190;
+  const uid = sanitizeFilename(options.uid || design.id || "bottle").replace(/-/g, "_");
+  const cx = W / 2;
+  const bodyTop = H * 0.25;
+  const bodyBottom = H * 0.88;
+  const bodyHeight = bodyBottom - bodyTop;
+  const maxMm = Math.max(Number(design.bodyDiameter) || 65, 85);
+  const scale = Math.min((W * 0.58) / maxMm, bodyHeight / (Number(design.height) || 220));
+  const maxW = (Number(design.bodyDiameter) || 65) * scale;
+  const depth = Number(design.bodyDepth) || Number(design.bodyDiameter) || 65;
+  const shoulder = clamp((Number(design.shoulderHeight) || 30) * scale, 18, 58);
+  const neckW = clamp((Number(design.neckDiameter) || BOTTLE_LOCK_VALUES.neckFinishOdMm) * scale * 1.1, 20, 42);
+  const capW = clamp(BOTTLE_LOCK_VALUES.capOdMm * scale * 1.12, 28, 48);
+  const capH = clamp(H * 0.045, 10, 16);
+  const neckY = bodyTop - capH * 1.4;
+  const capY = neckY - capH - 4;
+  const isTaper = /taper|iconic/i.test(design.concept) || design.pct > 65;
+  const isFlask = depth < (Number(design.bodyDiameter) || 65) * 0.86;
+  const topW = Math.max(neckW * 1.2, maxW * (isTaper ? 0.48 : isFlask ? 0.72 : 0.82));
+  const shoulderW = maxW * (isTaper ? 0.58 : isFlask ? 0.92 : 0.96);
+  const midW = maxW * (isTaper ? 0.76 : isFlask ? 1.06 : 1);
+  const bottomW = maxW * (isTaper ? 1.05 : isFlask ? 0.96 : 0.96);
+  const y1 = bodyTop + shoulder;
+  const y2 = bodyTop + bodyHeight * 0.58;
+  const y3 = bodyBottom - 12;
+  const path = `M ${cx - topW / 2} ${bodyTop}
+    C ${cx - shoulderW / 2} ${bodyTop + shoulder * 0.25}, ${cx - midW / 2} ${bodyTop + shoulder * 0.75}, ${cx - midW / 2} ${y1}
+    C ${cx - midW / 2} ${y1 + bodyHeight * 0.2}, ${cx - bottomW / 2} ${y2}, ${cx - bottomW / 2} ${y3}
+    Q ${cx - bottomW / 2} ${bodyBottom}, ${cx} ${bodyBottom}
+    Q ${cx + bottomW / 2} ${bodyBottom}, ${cx + bottomW / 2} ${y3}
+    C ${cx + bottomW / 2} ${y2}, ${cx + midW / 2} ${y1 + bodyHeight * 0.2}, ${cx + midW / 2} ${y1}
+    C ${cx + midW / 2} ${bodyTop + shoulder * 0.75}, ${cx + shoulderW / 2} ${bodyTop + shoulder * 0.25}, ${cx + topW / 2} ${bodyTop} Z`;
+  const xLeft = cx - Math.max(midW, bottomW, shoulderW) / 2;
+  const xRight = cx + Math.max(midW, bottomW, shoulderW) / 2;
+  const detailStroke = options.small ? 0.65 : 1;
+  let details = "";
+  const ribCount = Math.min(Math.round(Number(design.ribCount) || 0), options.small ? 12 : 36);
+  for (let i = 0; i < ribCount; i += 1) {
+    const x = xLeft + (i + 1) * (xRight - xLeft) / (ribCount + 1);
+    details += `<path d="M ${x} ${bodyTop + shoulder * .9} C ${x - 1.5} ${bodyTop + bodyHeight * .36}, ${x + 1.5} ${bodyTop + bodyHeight * .72}, ${x} ${bodyBottom - 8}" stroke="#51606a" stroke-width="${detailStroke}" opacity=".42" fill="none"/>`;
+  }
+  const ringCount = Math.min(Math.round(Number(design.ringCount) || 0), options.small ? 7 : 12);
+  for (let i = 0; i < ringCount; i += 1) {
+    const y = bodyTop + shoulder + 8 + i * (bodyHeight - shoulder - 28) / Math.max(1, ringCount - 1);
+    details += `<path d="M ${xLeft + 8} ${y} C ${cx - maxW * .28} ${y + 3}, ${cx + maxW * .28} ${y + 3}, ${xRight - 8} ${y}" stroke="#39444d" stroke-width="${detailStroke * 1.5}" opacity=".46" fill="none"/>`;
+  }
+  const facetCount = Math.min(Math.round(Number(design.facetCount) || 0), options.small ? 7 : 14);
+  for (let i = 0; i < facetCount; i += 1) {
+    const x = xLeft + (i + 1) * (xRight - xLeft) / (facetCount + 1);
+    const bias = (i % 2 === 0 ? -1 : 1) * maxW * .1;
+    details += `<path d="M ${x} ${bodyTop + shoulder * .5} L ${x + bias} ${bodyTop + bodyHeight * .58} L ${x - bias * .45} ${bodyBottom - 10}" stroke="#39444d" stroke-width="${detailStroke}" opacity=".45" fill="none"/>`;
+  }
+  const helixCount = Math.max(0, Math.min(Math.round(Number(design.helixRidges) || 0), options.small ? 7 : 12));
+  if (helixCount || Number(design.helixTurns) > 0.05) {
+    const count = Math.max(4, helixCount || 6);
+    for (let i = -1; i < count; i += 1) {
+      const yStart = bodyTop + shoulder + i * 14;
+      const yEnd = yStart + bodyHeight * .55 + Number(design.helixTurns || 0) * 13;
+      details += `<path d="M ${xLeft + 6} ${yStart} C ${cx - maxW * .13} ${yStart + bodyHeight * .18}, ${cx + maxW * .08} ${yEnd - bodyHeight * .18}, ${xRight - 6} ${yEnd}" stroke="#1f2937" stroke-width="${detailStroke * 1.4}" opacity=".48" fill="none"/>`;
+    }
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(design.id)} ${escapeHtml(design.concept)}">
+    <defs>
+      <linearGradient id="g-${uid}" x1="0" x2="1"><stop offset="0" stop-color="#d7e0de" stop-opacity=".22"/><stop offset=".35" stop-color="#ffffff" stop-opacity=".62"/><stop offset="1" stop-color="#6d8581" stop-opacity=".34"/></linearGradient>
+      <clipPath id="clip-${uid}"><path d="${path}"/></clipPath>
+    </defs>
+    <ellipse cx="${cx}" cy="${bodyBottom + 7}" rx="${Math.max(bottomW * .5, 22)}" ry="6" fill="#172225" opacity=".1"/>
+    <path d="${path}" fill="url(#g-${uid})" stroke="#24383d" stroke-width="${options.small ? 1.3 : 1.8}"/>
+    <g clip-path="url(#clip-${uid})">${details}<rect x="${cx - midW * .16}" y="${bodyTop + bodyHeight * .12}" width="${Math.max(4, midW * .08)}" height="${bodyHeight * .68}" rx="8" fill="#fff" opacity=".24"/></g>
+    <path d="M ${cx - neckW / 2} ${neckY} L ${cx - neckW / 2} ${bodyTop + 4} C ${cx - neckW / 2} ${bodyTop + 7}, ${cx + neckW / 2} ${bodyTop + 7}, ${cx + neckW / 2} ${bodyTop + 4} L ${cx + neckW / 2} ${neckY} Z" fill="url(#g-${uid})" stroke="#24383d" stroke-width="${options.small ? 1 : 1.5}"/>
+    <rect x="${cx - capW / 2}" y="${capY}" width="${capW}" height="${capH}" rx="4" fill="#24383d"/>
+  </svg>`;
+}
+
+function bottleGeneratedSteps() {
+  const fam = state._bottleMorph?.family || bottleFamilies()[0];
+  const count = bottleStepCount();
+  return Array.from({ length: count }, (_, index) => {
+    const pct = count === 1 ? 0 : Math.round((index / Math.max(1, count - 1)) * 100);
+    return bottleDesignFromMorph(fam, pct);
+  });
+}
+
+function renderBottleMorphStrip() {
+  const steps = bottleGeneratedSteps();
+  return `<div class="bottle-strip" aria-label="Generated morph steps">
+    ${steps.map((design, index) => `
+      <button type="button" class="bottle-card ${Math.round(design.pct) === Math.round(state._bottleMorph?.pct || 0) ? "active" : ""}" data-action="load-bottle-morph-step" data-pct="${design.pct}">
+        ${bottleSvg(design, { w: 104, h: 148, small: true, uid: `strip-${index}` })}
+        <span><b>${index + 1}/${steps.length}</b>${Math.round(design.pct)}% · ${round(design.height, 0)}H × ${round(design.bodyDiameter, 1)}W</span>
+      </button>
+    `).join("")}
+  </div>`;
+}
+
+function renderBottleMatrix() {
+  return `<details class="bottle-matrix">
+    <summary>5 × 5 seed matrix (${BOTTLE_VARIANTS.length} bottle concepts)</summary>
+    <div class="bottle-grid">
+      ${BOTTLE_VARIANTS.map((variant, index) => {
+        const design = bottleDesignFromVariant(variant);
+        return `<button type="button" class="bottle-tile ${state._bottleMorph?.activeId === variant.id ? "active" : ""}" data-action="load-bottle-matrix" data-variant-id="${variant.id}">
+          ${bottleSvg(design, { w: 118, h: 160, small: true, uid: `tile-${index}` })}
+          <b>${variant.id} · ${escapeHtml(variant.concept)}</b>
+          <span>${escapeHtml(variant.morph)} · ${round(variant.H, 0)} × ${round(variant.W, 1)} × ${round(variant.D, 1)} mm</span>
+          <em>${escapeHtml(bottleSurfaceLabel(design))}</em>
+        </button>`;
+      }).join("")}
+    </div>
+  </details>`;
+}
+
+function renderBottleFeatureOptions() {
+  return `<details class="bottle-feature-options">
+    <summary>Feature options from input sheet</summary>
+    <div class="feature-option-grid">
+      ${BOTTLE_FEATURE_OPTIONS.map(([feature, option1, option2, option3, purpose]) => `
+        <div class="feature-option">
+          <b>${escapeHtml(feature)}</b>
+          <span>${escapeHtml([option1, option2, option3].join(" / "))}</span>
+          <em>${escapeHtml(purpose)}</em>
+        </div>
+      `).join("")}
+    </div>
+  </details>`;
+}
+
+function bottleFormulaText(design = currentBottleDesign()) {
+  return `"Design_ID" = "${design.id || "CUSTOM"}"
+"Material" = "${design.material || BOTTLE_LOCK_VALUES.material}"
+"H_body_mm" = ${round(design.height, 2)}
+"Body_W_mm" = ${round(design.bodyDiameter, 2)}
+"Body_D_mm" = ${round(design.bodyDepth, 2)}
+"Wall_mm" = ${round(design.wall, 2)}
+"Base_mm" = ${round(design.base, 2)}
+"Shoulder_H_mm" = ${round(design.shoulderHeight, 2)}
+"Superellipse_n" = ${round(design.superellipseN, 2)}
+"Vertical_Rib_Count" = ${Math.round(design.ribCount || 0)}
+"Vertical_Rib_Depth_mm" = ${round(design.ribDepth, 2)}
+"Horizontal_Ring_Count" = ${Math.round(design.ringCount || 0)}
+"Horizontal_Ring_Depth_mm" = ${round(design.ringDepth, 2)}
+"Facet_Count" = ${Math.round(design.facetCount || 0)}
+"Facet_Depth_mm" = ${round(design.facetDepth, 2)}
+"Helix_Ridge_Count" = ${Math.round(design.helixRidges || 0)}
+"Helix_Ridge_Depth_mm" = ${round(design.helixDepth, 2)}
+"Helix_Turns" = ${round(design.helixTurns, 2)}
+
+// Locked closure / base controls
+"NeckFinish_OD_mm" = ${BOTTLE_LOCK_VALUES.neckFinishOdMm}
+"Mouth_ID_mm" = ${BOTTLE_LOCK_VALUES.mouthIdMm}
+"Thread_Pitch_mm" = ${BOTTLE_LOCK_VALUES.threadPitchMm}
+"Cap_OD_mm" = ${BOTTLE_LOCK_VALUES.capOdMm}
+"Cap_H_mm" = ${BOTTLE_LOCK_VALUES.capHeightMm}
+"Base_min_mm" = ${BOTTLE_LOCK_VALUES.minBaseMm}
+
+// Body surface equation
+x = A(z) * sign(cos(theta + phi)) * |cos(theta + phi)|^(2/n) * [1 + Relief(z, theta)/R]
+y = B(z) * sign(sin(theta + phi)) * |sin(theta + phi)|^(2/n) * [1 + Relief(z, theta)/R]
+Relief = vertical ribs + horizontal rings + faceted panels + helical stream ribs`;
+}
+
+function renderBottleGatePanel() {
+  const design = currentBottleDesign();
+  const overflow = bottleEstimatedOverflow(design);
+  const scale = bottleRecommendedScale(design);
+  const overflowOk = overflow >= BOTTLE_LOCK_VALUES.overflowTargetMl - BOTTLE_LOCK_VALUES.overflowToleranceMl
+    && overflow <= BOTTLE_LOCK_VALUES.overflowTargetMl + BOTTLE_LOCK_VALUES.overflowToleranceMl;
+  const wallOk = design.wall >= 0.65 && design.wall <= 0.85;
+  const baseOk = design.base >= BOTTLE_LOCK_VALUES.minBaseMm;
+  const metrics = [
+    ["Nominal fill", `${BOTTLE_LOCK_VALUES.targetFillMl} ml`, "locked label target"],
+    ["Estimated overflow", `${round(overflow, 0)} ml`, overflowOk ? "inside concept gate" : `scale W/D × ${round(scale, 3)}`],
+    ["Body envelope", `${round(design.height, 0)} × ${round(design.bodyDiameter, 1)} × ${round(design.bodyDepth, 1)} mm`, "H × W × D"],
+    ["Wall / base", `${round(design.wall, 2)} / ${round(design.base, 1)} mm`, "body target / base"],
+    ["Surface", bottleSurfaceLabel(design), "parametric relief"],
+    ["Cap / neck", `${BOTTLE_LOCK_VALUES.capOdMm} mm / ${BOTTLE_LOCK_VALUES.neckFinishOdMm} mm`, "separate locked part"]
+  ];
+  const checks = [
+    ["locked", "Product identity", "Water identity / quality is a release gate; CAD remains compatible with a 500 ml bottled-water package."],
+    [overflowOk ? "pass" : "adjust", "Fill / overflow capacity", overflowOk ? `Estimated overflow ${round(overflow, 0)} ml is within ${BOTTLE_LOCK_VALUES.overflowTargetMl} ± ${BOTTLE_LOCK_VALUES.overflowToleranceMl} ml.` : `Estimated overflow ${round(overflow, 0)} ml is outside the concept gate; scale body W/D by ${round(scale, 3)} or adjust height.`],
+    ["locked", "Neck / closure interface", `${BOTTLE_LOCK_VALUES.neckFinishOdMm} mm neck OD, ${BOTTLE_LOCK_VALUES.mouthIdMm} mm mouth ID, ${BOTTLE_LOCK_VALUES.threadPitchMm} mm pitch, and cap envelope are locked.`],
+    [baseOk ? "locked" : "adjust", "Bottom / standing ring", baseOk ? `Base target ${round(design.base, 1)} mm clears the ${BOTTLE_LOCK_VALUES.minBaseMm} mm minimum.` : "Base target is below minimum; re-lock to approved base package."],
+    [wallOk ? "pass" : "adjust", "Wall process window", wallOk ? `Wall target ${round(design.wall, 2)} mm is inside the concept window.` : `Wall target ${round(design.wall, 2)} mm needs engineering review.`],
+    ["doc", "Food-contact material package", "Resin, enzyme/additive, colorants, cap, plug/liner, inks, coatings, and adhesives require food-contact authorization/migration review before release."],
+    ["disabled", "Environmental claims", "Compostable, biodegradable, or recyclable claims stay disabled until the finished package is substantiated and qualified."]
+  ];
+  return `<div class="bottle-gates">
+    <div class="bottle-metrics">${metrics.map(([label, value, note]) => `<div class="bottle-metric"><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b><span>${escapeHtml(note)}</span></div>`).join("")}</div>
+    <div class="bottle-checks">${checks.map(([status, title, note]) => `<div class="bottle-check ${status}"><span>${escapeHtml(status)}</span><div><b>${escapeHtml(title)}</b><p>${escapeHtml(note)}</p></div></div>`).join("")}</div>
+    <details class="formula-details">
+      <summary>SolidWorks surface logic</summary>
+      <pre>${escapeHtml(bottleFormulaText(design))}</pre>
+    </details>
+    <details class="formula-details">
+      <summary>Code / compliance gates</summary>
+      <div class="code-gate-list">${BOTTLE_CODE_GATES.map(([area, rule, gate]) => `<div><b>${escapeHtml(area)}</b><span>${escapeHtml(rule)}: ${escapeHtml(gate)}</span></div>`).join("")}</div>
+    </details>
+  </div>`;
+}
+
 function renderBottleSliders() {
-  const morphFamilies = [...new Set(BOTTLE_VARIANTS.map(v => v.morph))];
+  const morphFamilies = bottleFamilies();
   const curFam = state._bottleMorph?.family || morphFamilies[0];
   const curPct = state._bottleMorph?.pct ?? 0;
+  const steps = bottleStepCount();
 
   const sliderRows = BOTTLE_SLIDER_CONFIG.map(cfg => {
     const raw = getBottleParam(cfg.key);
@@ -2351,10 +2856,26 @@ function renderBottleSliders() {
         <input type="range" id="bslMorphPct" min="0" max="100" step="1" value="${curPct}">
         <p class="bsl-note">Drag to blend between the two seed designs.</p>
       </div>
+      <div class="bsl-row">
+        <label class="bsl-label">
+          <span>Generated steps</span>
+          <span class="bsl-val" id="bslStepCountLabel">${steps}</span>
+        </label>
+        <input type="range" id="bslStepCount" min="3" max="25" step="1" value="${steps}">
+        <p class="bsl-note">Builds the n-step morph strip and CSV configurations from the selected family.</p>
+      </div>
+      <div class="bsl-divider">Generated morph strip</div>
+      <div id="bottleMorphStripSlot">${renderBottleMorphStrip()}</div>
       <div class="bsl-divider">Body parameters</div>
       ${sliderRows}
       <div class="bsl-divider">Locked specs</div>
       <div class="bsl-locks">${lockRows}</div>
+      <div class="bsl-actions">
+        <button class="button ghost" data-action="reset-bottle-nearest" type="button">Reset to nearest seed</button>
+        <button class="button ghost" data-action="export-bottle-morph-csv" type="button">Export n-step CSV</button>
+      </div>
+      ${renderBottleMatrix()}
+      ${renderBottleFeatureOptions()}
     </div>`;
 }
 
@@ -2560,7 +3081,7 @@ function renderSpecs() {
       </div>
       <div class="button-row">
         <button class="button secondary" data-action="apply-parameters">Apply specs</button>
-        <button class="button ghost" data-action="export-snapshot">Export JSON</button>
+        <button class="button ghost" data-action="${state.concept.family === "bottle" ? "export-bottle-json" : "export-snapshot"}">Export JSON</button>
       </div>
     </div>
     <div class="specs-body">
@@ -2604,6 +3125,7 @@ function renderSpecs() {
         <div class="chip-list">
           ${state.concept.features.map(feature => `<span class="chip">${escapeHtml(feature)}</span>`).join("")}
         </div>
+        ${state.concept.family === "bottle" ? renderBottleGatePanel() : ""}
       </aside>
     </div>
   `;
@@ -2701,6 +3223,15 @@ function build3DGeometry(family, params) {
     const nR  = getP(params, "neckDiameter", 28) / 2;
     const sH  = getP(params, "shoulderHeight", 28);
     const nH  = getP(params, "neckHeight", 25);
+    const ribCount = getP(params, "ribCount", 0);
+    const ribDepth = getP(params, "ribDepth", 0);
+    const ringCount = getP(params, "ringCount", 0);
+    const ringDepth = getP(params, "ringDepth", 0);
+    const facetCount = getP(params, "facetCount", 0);
+    const facetDepth = getP(params, "facetDepth", 0);
+    const helixRidges = getP(params, "helixRidges", 0);
+    const helixDepth = getP(params, "helixDepth", 0);
+    const helixTurns = getP(params, "helixTurns", 0);
     const bH  = 8;
     const bodyTop = H - sH - nH;
     const pts = [
@@ -2713,13 +3244,40 @@ function build3DGeometry(family, params) {
     ];
     const geom = new THREE.LatheGeometry(pts, 72);
     // Apply oval squeeze when depth differs from diameter
-    if (Math.abs(D - R) > 2) {
+    if (Math.abs(D - R) > 2 || ribDepth || ringDepth || facetDepth || helixDepth) {
       const pos = geom.attributes.position;
       for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
         const y = pos.getY(i);
+        const z = pos.getZ(i);
         const bodyRatio = Math.min(1, Math.max(0, (y - bH) / Math.max(1, bodyTop - bH)));
         const squash = D / R;
-        pos.setZ(i, pos.getZ(i) * (squash * bodyRatio + 1 * (1 - bodyRatio)));
+        let nx = x;
+        let nz = z * (squash * bodyRatio + 1 * (1 - bodyRatio));
+        const inBody = y >= bH && y <= bodyTop;
+        if (inBody) {
+          const theta = Math.atan2(nz, nx);
+          const radius = Math.max(1, Math.sqrt(nx * nx + nz * nz));
+          let relief = 0;
+          if (ribCount > 0 && ribDepth > 0) {
+            relief -= ribDepth * Math.pow(0.5 + 0.5 * Math.cos(theta * Math.round(ribCount)), 8);
+          }
+          if (ringCount > 0 && ringDepth > 0) {
+            relief -= ringDepth * Math.pow(0.5 + 0.5 * Math.cos(bodyRatio * Math.round(ringCount) * Math.PI * 2), 10);
+          }
+          if (facetCount > 2 && facetDepth > 0) {
+            relief -= facetDepth * (0.5 + 0.5 * Math.cos(theta * Math.round(facetCount)));
+          }
+          if ((helixRidges > 0 || helixTurns > 0) && helixDepth > 0) {
+            const ridges = Math.max(1, Math.round(helixRidges || 8));
+            relief -= helixDepth * Math.pow(0.5 + 0.5 * Math.cos(theta * ridges - bodyRatio * helixTurns * Math.PI * 2), 8);
+          }
+          const scaled = Math.max(0.72, (radius + relief) / radius);
+          nx *= scaled;
+          nz *= scaled;
+        }
+        pos.setX(i, nx);
+        pos.setZ(i, nz);
       }
       pos.needsUpdate = true;
       geom.computeVertexNormals();
@@ -2916,6 +3474,16 @@ document.addEventListener("click", event => {
   if (action === "export-cloud-package") exportCloudPackage();
   if (action === "export-design-table") exportDesignTable();
   if (action === "export-snapshot") exportSnapshot();
+  if (action === "export-bottle-json") exportBottleActiveJson();
+  if (action === "export-bottle-morph-csv") exportBottleMorphCsv();
+  if (action === "reset-bottle-nearest") resetBottleToNearestSeed();
+  if (action === "load-bottle-morph-step") {
+    applyBottleMorphPercent(Number(target.dataset.pct), state._bottleMorph?.family || bottleFamilies()[0], { bumpRevision: true });
+    persist("Morph step loaded");
+  }
+  if (action === "load-bottle-matrix" && target.dataset.variantId) {
+    loadBottleVariant(target.dataset.variantId);
+  }
   if (action === "reset-demo") resetDemo();
   if (action === "lookup-standards") lookupStandards();
   if (action === "download-sw-vars") downloadSolidWorksMacro();
@@ -2933,18 +3501,19 @@ document.addEventListener("input", event => {
     const lbl = document.getElementById("bslv-" + bslKey);
     if (lbl) lbl.textContent = fmtSliderVal(cfg, val);
     saveOnly();
+    renderSpecs();
     requestAnimationFrame(mount3DViewer);
     return;
   }
   if (event.target.id === "bslMorphPct") {
     const pct = Number(event.target.value);
     state._bottleMorph = state._bottleMorph || {};
-    const fam = state._bottleMorph.family || [...new Set(BOTTLE_VARIANTS.map(v => v.morph))][0];
-    state._bottleMorph.pct = pct;
-    const morphed = morphBottleAtPct(fam, pct);
-    applyMorphedVariant(morphed);
+    const fam = state._bottleMorph.family || bottleFamilies()[0];
+    applyBottleMorphPercent(pct, fam);
     const pctLbl = document.getElementById("bslMorphPctLabel");
     if (pctLbl) pctLbl.textContent = `${pct}%`;
+    const stripSlot = document.getElementById("bottleMorphStripSlot");
+    if (stripSlot) stripSlot.innerHTML = renderBottleMorphStrip();
     // Sync all sliders to new interpolated values without re-render
     for (const cfg of BOTTLE_SLIDER_CONFIG) {
       const v = getBottleParam(cfg.key);
@@ -2956,7 +3525,19 @@ document.addEventListener("input", event => {
       if (lblEl) lblEl.textContent = fmtSliderVal(cfg, clamped);
     }
     saveOnly();
+    renderSpecs();
     requestAnimationFrame(mount3DViewer);
+    return;
+  }
+  if (event.target.id === "bslStepCount") {
+    const steps = Math.round(Number(event.target.value));
+    state._bottleMorph = state._bottleMorph || { family: bottleFamilies()[0], pct: 0 };
+    state._bottleMorph.steps = steps;
+    const label = document.getElementById("bslStepCountLabel");
+    if (label) label.textContent = steps;
+    const stripSlot = document.getElementById("bottleMorphStripSlot");
+    if (stripSlot) stripSlot.innerHTML = renderBottleMorphStrip();
+    saveOnly();
   }
 });
 
@@ -2970,8 +3551,9 @@ document.addEventListener("change", event => {
   }
   if (event.target.id === "bslMorphFam") {
     const fam = event.target.value;
-    state._bottleMorph = { family: fam, pct: 0 };
-    const seeds = BOTTLE_VARIANTS.filter(v => v.morph === fam);
+    const steps = state._bottleMorph?.steps || 5;
+    state._bottleMorph = { family: fam, pct: 0, steps };
+    const seeds = bottleFamilySeeds(fam);
     if (seeds.length) loadBottleVariant(seeds[0].id);
     else persist();
   }

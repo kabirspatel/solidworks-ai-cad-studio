@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=12 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=13 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=11) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=13) to force GitHub Pages cache bust.
 
 ---
 
@@ -177,6 +177,9 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Standards constraints added to VBA macro export**: `downloadSolidWorksMacro()` now includes selected standards, constraints, test notes, and label notes as a comment block in the generated `.swb`.
 - **Macro text escaping hardened**: generated macro strings now escape double quotes and newlines in project/material/parameter/standard text.
 - **Cache bust bumped**: `index.html` now loads `app.js?v=12`.
+- **Bottle sketch features made functional**: the sample `preview (1).html` morph step-count slider, generated n-step morph strip, 5x5 seed matrix, reset-to-nearest-seed flow, feature-option list, code gates, live bottle metrics, SolidWorks surface-logic text, and n-step CSV export are now integrated into the dashboard.
+- **Surface sliders now affect geometry**: ribs, rings, facets, helix ridges, and oval body depth deform the Three.js fallback mesh and the `cad-server` STL mesh instead of only changing text values.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=13`.
 
 ---
 
@@ -190,13 +193,7 @@ Kabir's Gemini free-tier key is exhausted. Options:
 - Or tell Kabir to add an OpenAI or Claude key via the AI Provider dropdown
 - The `callAiEndpoint()` function already supports a custom bridge endpoint — just needs a deployed backend
 
-**2. 3D viewer doesn't show surface features**  
-Ribs (`ribCount`/`ribDepth`), facets (`facetCount`/`facetDepth`), helix ridges — none appear in Three.js preview. The viewer only shows the lathe revolution profile.  
-Fix paths:
-- Option A: Deploy `cad-server/` to Render.com — it returns a real STL. Paste the URL into "Geometry server" field in the dashboard. The `mount3DViewer()` will fetch it automatically.
-- Option B: Add Three.js surface deformation to `build3DGeometry()` for bottle — create rib indentations using vertex displacement along the lathe profile. Hard but no server needed.
-
-**3. Deploy cad-server to Render.com**
+**2. Deploy cad-server to Render.com**
 ```sh
 # Already configured in render.yaml:
 # - name: solidworks-cad-server
@@ -210,19 +207,19 @@ Note: free tier sleeps after 15 min, first request takes ~30s to wake.
 
 ### MEDIUM PRIORITY
 
-**4. Morph slider overwrites manual edits**
+**3. Morph slider overwrites manual edits**
 If user manually edits a slider value, then drags the morph position slider, all manual edits are overwritten by the interpolated values. This is jarring.  
 Fix: Add a "lock" toggle per slider — locked sliders are excluded from morph interpolation.
 
-**5. MCP server not connected**
+**4. MCP server not connected**
 `bridge/McpServer/server.mjs` exists as a JSON-RPC 2.0 stdio server. If wired to a Claude Code session, Claude could call tools that directly push parameters to SolidWorks during prompting.  
 To activate: run the MCP server, add it to `.claude/settings.json` under `mcpServers`. This would let Kabir use Claude Code itself as the AI that drives the dashboard parameters.
 
-**6. AI parse failures need better fallback**
+**5. AI parse failures need better fallback**
 When AI returns prose instead of JSON, `parseJsonFromText()` throws "AI returned text instead of model JSON."  
 Fix: On parse failure, try to extract the reply as a plain text message and display it in the AI output box rather than showing a red error box. Only show error box for network/auth failures.
 
-**7. localStorage migration**
+**6. localStorage migration**
 State is versioned at `solidworks-ai-cad-studio-v4`. If schema changes break old saved state (missing fields), `normalizeState()` fills defaults — but this doesn't always work cleanly.  
 Fix: Add a schema version check in `normalizeState()` that fully resets state if the major structure doesn't match.
 
@@ -315,7 +312,7 @@ You are continuing work on SolidWorks AI CAD Studio.
 
 Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
-Latest pushed version: v=12 in index.html (use `git log -1 --oneline` for the current hash)
+Latest pushed version: v=13 in index.html (use `git log -1 --oneline` for the current hash)
 
 Read CLAUDE_HANDOFF.md first for full current state, what works, and what needs to be done.
 
@@ -336,8 +333,8 @@ Highest priority next tasks:
 1. Deploy cad-server/ to Render.com for real 3D mesh (render.yaml already configured)
 2. Connect MCP server (bridge/McpServer/server.mjs) to enable Claude-native parameter control
 3. Add server-side AI proxy so users don't need their own API keys
-4. Add bottle surface features to either cad-server STL output or Three.js fallback preview
-5. Add morph-slider parameter locks so manual slider edits are not overwritten
+4. Add morph-slider parameter locks so manual slider edits are not overwritten
+5. Extend the SolidWorks bridge/native host so launch, rebuild, export, drawing, and rendering buttons call real Windows SolidWorks APIs
 
-Bump ?v=N in index.html after each significant change (currently v=12).
+Bump ?v=N in index.html after each significant change (currently v=13).
 ```

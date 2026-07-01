@@ -139,6 +139,7 @@ def gp(params, key, fallback):
 def gen_bottle(params):
     H  = gp(params, "height", 232)
     R  = gp(params, "bodyDiameter", 58) / 2
+    D  = gp(params, "bodyDepth", R * 2) / 2
     nR = gp(params, "neckDiameter", 28) / 2
     sH = gp(params, "shoulderHeight", 28)
     nH = gp(params, "neckHeight", 25)
@@ -152,7 +153,47 @@ def gen_bottle(params):
         (nR, H - nH),
         (nR, H),
     ]
-    return revolve(profile, n=80)
+    verts, faces = revolve(profile, n=96)
+    return deform_bottle_surface(verts, faces, params, R, D, bH, body_top)
+
+
+def deform_bottle_surface(verts, faces, params, radius, depth_radius, base_h, body_top):
+    """Apply oval depth, ribs, rings, facets, and helix relief to bottle body vertices."""
+    rib_count = gp(params, "ribCount", 0)
+    rib_depth = gp(params, "ribDepth", 0)
+    ring_count = gp(params, "ringCount", 0)
+    ring_depth = gp(params, "ringDepth", 0)
+    facet_count = gp(params, "facetCount", 0)
+    facet_depth = gp(params, "facetDepth", 0)
+    helix_count = gp(params, "helixRidges", 0)
+    helix_depth = gp(params, "helixDepth", 0)
+    helix_turns = gp(params, "helixTurns", 0)
+    squash = depth_radius / radius if radius else 1.0
+    span = max(1.0, body_top - base_h)
+
+    for i in range(len(verts)):
+        x, y, z = verts[i]
+        body_ratio = min(1.0, max(0.0, (z - base_h) / span))
+        y *= squash * body_ratio + (1.0 - body_ratio)
+        if base_h <= z <= body_top:
+            theta = np.arctan2(y, x)
+            r = max(1.0, np.sqrt(x * x + y * y))
+            relief = 0.0
+            if rib_count > 0 and rib_depth > 0:
+                relief -= rib_depth * (0.5 + 0.5 * np.cos(theta * round(rib_count))) ** 8
+            if ring_count > 0 and ring_depth > 0:
+                relief -= ring_depth * (0.5 + 0.5 * np.cos(body_ratio * round(ring_count) * np.pi * 2)) ** 10
+            if facet_count > 2 and facet_depth > 0:
+                relief -= facet_depth * (0.5 + 0.5 * np.cos(theta * round(facet_count)))
+            if (helix_count > 0 or helix_turns > 0) and helix_depth > 0:
+                ridges = max(1, round(helix_count or 8))
+                relief -= helix_depth * (0.5 + 0.5 * np.cos(theta * ridges - body_ratio * helix_turns * np.pi * 2)) ** 8
+            scale = max(0.72, (r + relief) / r)
+            x *= scale
+            y *= scale
+        verts[i] = [x, y, z]
+
+    return verts, faces
 
 
 def gen_enclosure(params):
