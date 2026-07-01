@@ -1,140 +1,44 @@
-# SolidWorks AI CAD Studio — Handoff
+# SolidWorks AI CAD Studio — Full Handoff
 
-**Repo:** `https://github.com/kabirspatel/solidworks-ai-cad-studio`  
-**Live URL:** `https://kabirspatel.github.io/solidworks-ai-cad-studio/`  
-**Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`
+**Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
+**Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
+**Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
+**Latest commit:** `483373b` (v=11)
 
 ---
 
 ## What this app is
 
-A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user describes a part (or picks a seed variant for bottles), adjusts sliders, AI generates parameters, and the result is either pushed to local SolidWorks via a VBA macro, previewed in an embedded 3D viewer, or exported as a CSV design table.
+A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user describes a part (or picks from 25 seed bottle variants), adjusts sliders, AI generates parameters, and the result pushes to local SolidWorks via a VBA macro or is previewed live in a Three.js 3D viewer.
 
-**Platform:** pure static HTML/CSS/JS — no build step, no Node at runtime. Deploy = `git push`.
+**Stack:** Pure static HTML/CSS/JS — no build step, no Node at runtime.  
+**Deploy:** `git add . && git commit && git push origin main` → GitHub Pages auto-builds.
 
 ---
 
 ## File map
 
 ```
-index.html          — single-page shell (4 panel sections)
-styles.css          — all styles
-app.js              — everything: state, renders, AI calls, SolidWorks bridge, 3D viewer
+index.html               — single-page shell, 4 panel sections
+styles.css               — all styles
+app.js                   — everything (~3000 lines): state, renders, AI, 3D viewer, SolidWorks bridge
+
+cad-server/
+  main.py                — FastAPI + numpy geometry server (generates real STL)
+  requirements.txt       — fastapi, uvicorn, numpy
 
 bridge/
   MacDevBridge/
-    server.mjs      — Node.js local bridge (run on Mac to test without SolidWorks)
-    README.md
+    server.mjs           — Node.js local bridge (simulates SolidWorks responses on Mac)
+  McpServer/
+    server.mjs           — MCP server scaffold (NOT yet wired to dashboard)
   CloudBroker/
-    server.mjs      — OAuth/push scaffold (not wired to real Dassault APIs yet)
-    README.md
+    server.mjs           — OAuth/push scaffold (NOT connected to real Dassault APIs)
+  SolidWorksBridge/      — Windows COM scaffold (not tested)
+  SolidWorksNativeHost/  — Windows WPF embed scaffold (not tested)
 
-cad-server/
-  main.py           — FastAPI + numpy geometry server (generates real STL from params)
-  requirements.txt  — fastapi, uvicorn, numpy
-
-render.yaml         — Render.com free-tier deploy config for cad-server
-```
-
----
-
-## What WORKS today
-
-### AI Copilot
-All three provider modes are wired and correct:
-
-| Mode | Endpoint | Key storage | Status |
-|------|----------|-------------|--------|
-| **Gemini** | `generativelanguage.googleapis.com/v1beta/.../gemini-2.0-flash` | `sessionStorage` | ✅ Working |
-| **Claude** | `api.anthropic.com/v1/messages` — model `claude-sonnet-4-6`, header `anthropic-dangerous-direct-browser-access: true` | `sessionStorage` | ✅ Working |
-| **OpenAI** | `api.openai.com/v1/chat/completions` — default model `gpt-4o-mini` | `sessionStorage` | ✅ Fixed (was using wrong /v1/responses endpoint) |
-
-> **Keys are session-only** — stored in `sessionStorage`, never `localStorage`, never sent to any server. They clear when the browser tab closes.
-
-How AI is used: user types a design intent prompt → copilot calls the selected AI → AI returns JSON → parameters populate the specs table.
-
-### Bottle parametric design (the main workflow)
-- 25 seed variants B01–B25, each with a concept + morph family assignment
-- 5 morph families for interpolation (e.g. "01→03: Minimal cylinder → Sculpted icon")
-- 15 parameter sliders (height, body diameter, depth, shoulder height, wall, rib count/depth, ring count/depth, facet count/depth, helix ridges/depth/turns, superellipse n)
-- Morph position slider linearly interpolates all numeric params between seed designs
-- All slider changes update the 3D viewer in real time (no full re-render)
-- State persists to `localStorage` under key `solidworks-ai-cad-studio-v4`
-
-### 3D viewer (Three.js r128)
-- OrbitControls — drag to rotate, scroll to zoom
-- Renders parametric geometry from the current parameters
-- Bottle: `LatheGeometry` with body radius, neck radius, shoulder height, neck height + oval squeeze when bodyDepth ≠ bodyDiameter
-- Bracket: `ExtrudeGeometry` L-shape
-- Tray/Enclosure/Assembly: `BoxGeometry`
-- If a geometry server URL is configured: fetches real STL via POST to `/api/generate`, falls back to parametric if server is unavailable
-
-### Push to SolidWorks (VBA macro)
-- "Push to SolidWorks" downloads a `.swb` macro file
-- In SolidWorks: **Tools → Macros → Run** → select the file
-- Macro uses `EquationMgr.Add2` to set global variables matching the parameter keys
-- SolidWorks dimension names use `swDimension` field (e.g. `D1@HEIGHT`)
-
-### Local SolidWorks bridge (MacDevBridge)
-- Run `node bridge/MacDevBridge/server.mjs` on your Mac
-- Default URL: `http://127.0.0.1:8787`
-- Type that URL in the "Local bridge" field and click "Connect bridge"
-- Implements `/api/simulate`, `/api/optimize`, `/api/material-assessment`, `/api/agents/run` — all return deterministic local estimates
-- Writes payloads to `bridge/MacDevBridge/runs/`
-
-### Standards & compliance
-- ~50 curated standards across bottle, enclosure, bracket, tray families
-- "Auto-match" infers applicable standards from prompt text + material
-- Checkboxes let user select active standards
-- Selected standards generate constraints (character limits, test requirements) that feed into the AI system prompt
-
-### Design table
-- "Export CSV" downloads a SolidWorks-compatible design table
-- All parameters with `swDimension` names, one configuration row per variant
-
----
-
-## What is STUB / not real yet
-
-| Feature | Reality |
-|---------|---------|
-| FEA (Run simulation) | Local formula estimates only — bridge endpoints not connected to real SolidWorks Simulation |
-| Optimize | Local rule-based suggestions — no real optimization engine |
-| Material/LCA | Local lookup table — no real material database or LCA API |
-| Run agents | Local status strings — no real agent execution |
-| CloudBroker | OAuth scaffolding only — not connected to Dassault APIs |
-| Cloud CAD embed | Only shows iframe if user pastes a URL manually; no auth |
-| Image geometry extraction | Browser-side contour approximation from image files — not real photogrammetry |
-
-> The analysis buttons (FEA, Optimize, Material, Agents) were removed from the UI in the current version. Their results only appear in the Specs panel via the status strip if the MacDevBridge returns them.
-
----
-
-## Geometry server (cad-server)
-
-A FastAPI/numpy server that generates actual STL binary for the 5 product families.
-
-**Run locally:**
-```sh
-cd cad-server
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-**Deploy to Render.com (free tier):**
-- `render.yaml` is already configured
-- Go to render.com → New Web Service → connect the repo
-- After deploy, paste the `https://xxx.onrender.com` URL into the "Geometry server" field in the dashboard
-- Free tier spins down after 15 min inactivity — first request takes ~30s
-
-**API:**
-```
-POST /api/generate
-  Body: { "family": "bottle|enclosure|bracket|tray|assembly", "parameters": [...] }
-  Returns: binary STL (Content-Type: application/octet-stream)
-
-GET /health
-  Returns: { "status": "ok" }
+render.yaml              — Render.com deploy config for cad-server
+CLAUDE_HANDOFF.md        — this file
 ```
 
 ---
@@ -144,123 +48,298 @@ GET /health
 ```sh
 cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 python3 -m http.server 5174 --bind 127.0.0.1
-# Open http://127.0.0.1:5174
+# open http://127.0.0.1:5174
 ```
 
-No build step. Edit `app.js` or `styles.css`, reload the browser.
-
-Bump `?v=N` in `index.html` after significant JS changes to force cache-bust on GitHub Pages.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=11) to force GitHub Pages cache bust.
 
 ---
 
-## How to deploy
+## Architecture: how app.js works
 
+- Global `state` object — serialized to `localStorage` key `solidworks-ai-cad-studio-v4`
+- `render()` redraws all 4 panels by setting innerHTML
+- `persist(label)` = `saveOnly()` + `render()` + toast
+- `saveOnly()` = direct `localStorage.setItem` without render (used by live sliders)
+- `syncDraftFromDom()` — reads all form fields into state before any action
+- Three.js scene lives in module-level `_three` variable, reused across renders via `mount3DViewer()`
+- API keys in `sessionStorage` only (never persisted, clears on tab close)
+
+---
+
+## What WORKS (confirmed)
+
+### AI Copilot — all three modes correct
+| Provider | Endpoint | Key storage | Notes |
+|----------|----------|-------------|-------|
+| **Gemini** | `generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent` | `sessionStorage` SESSION_GEMINI_KEY | Free tier quota exhausted for Kabir's key |
+| **Claude** | `api.anthropic.com/v1/messages`, model `claude-sonnet-4-6`, header `anthropic-dangerous-direct-browser-access: true` | `sessionStorage` SESSION_CLAUDE_KEY | Working |
+| **OpenAI** | `api.openai.com/v1/chat/completions`, default model `gpt-4o-mini` | `sessionStorage` SESSION_AI_KEY | Working (was broken, fixed this session) |
+| **Local parser** | No network call | — | Always available, returns deterministic output |
+
+AI flow: prompt → `askCopilot()` → `callGemini/Claude/OpenAI()` → `parseJsonFromText()` → `applyAiPayload()` → `updateFromBlueprint()` → `persist()` → `render()`
+
+### Bottle parametric design
+- 25 seed variants B01–B25, each with full parameter set + morph family
+- 5 morph families: `"01→03"`, `"04→06"`, `"07→08"`, `"08→09"`, `"07→09"`
+- `morphBottleAtPct(famKey, pct)` — linearly interpolates all params between first/last seed in family
+- 15 sliders: height, bodyDiameter, bodyDepth, shoulderHeight, superellipseN, wall, ribCount, ribDepth, ringCount, ringDepth, facetCount, facetDepth, helixRidges, helixDepth, helixTurns
+- Slider changes call `setBottleParam()` + `saveOnly()` + `requestAnimationFrame(mount3DViewer)` — no full re-render, stays responsive
+
+### 3D viewer (Three.js r128)
+- OrbitControls: drag to rotate, scroll to zoom
+- Bottle geometry: `LatheGeometry` profile + oval squeeze when `bodyDepth ≠ bodyDiameter`
+- Bracket: `ExtrudeGeometry` L-shape
+- Tray/Enclosure/Assembly: `BoxGeometry`
+- If `state.cadServer.url` is set: fetches real STL from `/api/generate`, falls back to parametric on error
+- Viewer does NOT show ribs, facets, or helix features (only lathe profile)
+
+### SolidWorks macro (VBA .swb)
+- "Push to SolidWorks" in model panel → downloads `.swb` file
+- In SolidWorks: **Tools → Macros → Run** → select the file
+- Uses `EquationMgr.Add2` to set global variables
+- Parameter keys map to `swDimension` field (e.g. `D1@HEIGHT`, `D12@RIB_COUNT`)
+- Works with any SolidWorks license (including Georgia Tech student)
+
+### MacDevBridge (local testing)
 ```sh
-cd /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
-git add app.js index.html styles.css CLAUDE_HANDOFF.md
-git commit -m "describe change"
-git push origin main
+node bridge/MacDevBridge/server.mjs
+# runs at http://127.0.0.1:8787
+```
+Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessment`, `/api/agents/run` — all return deterministic local estimates, writes to `bridge/MacDevBridge/runs/`
+
+### Standards matching
+- ~50 curated standards (bottle FDA/ISO, enclosure IP ratings, bracket load specs, etc.)
+- `lookupStandards()` — keyword matches prompt + material + family against static catalog
+- Selected standards feed constraints into AI system prompt and show in specs panel
+- **NOT included in VBA macro export** (gap to fix)
+
+### Design table / export
+- Export CSV: SolidWorks-compatible design table, all params with `swDimension` names
+- Export JSON: full model payload
+- Export SW vars: `.swb` VBA macro
+
+---
+
+## What is STUB / NOT real
+
+| Feature | Reality |
+|---------|---------|
+| FEA / "Run simulation" | Local formula estimate. Buttons removed from UI — only results shown in specs if bridge returns them |
+| Optimize | Local rule-based suggestions |
+| Material/LCA | Local lookup table |
+| Run agents | Local status strings |
+| CloudBroker | OAuth scaffolding only — no Dassault API connection |
+| MCP server | Exists at `bridge/McpServer/server.mjs` but not wired to dashboard or active Claude session |
+| Cloud CAD embed | Shows iframe only if user manually pastes a URL |
+| Image geometry extraction | Browser canvas pixel analysis — rough contour, not photogrammetry |
+
+---
+
+## Work done this session (July 2026)
+
+### Breaking fixes
+- **OpenAI API** was hitting wrong endpoint (`/v1/responses` with `store`/`instructions`/`input` fields) → fixed to `/v1/chat/completions` with `messages` array
+- **Default model** was `gpt-5-mini` (doesn't exist) → `gpt-4o-mini`
+- **`syncDraftFromDom` mode defaults** had `openai: "gpt-4o"` → `"gpt-4o-mini"`
+
+### Hardcoding removed
+- `loadBottleVariant()` was injecting "STREAMS" project name and long regulatory boilerplate into every bottle's prompt/requirements
+- Hardcoded `material: "PLA + enzyme additive system"` in `loadBottleVariant()` → now uses `state.concept.material`
+- `DEFAULT_CLOUD_SPACE_URL` was `"https://my.3dexperience.3ds.com/"` → now `""` so field starts blank
+
+### UI rebuilt / cleaned
+- **Model panel**: removed 4 fake analysis buttons (Run FEA / Optimize / Material-LCA / Run Agents), rebuilt as clean bridge config + 3D preview + collapsible cloud embed
+- **AI Copilot panel**: cleaner provider labels, key-loaded badge indicator, correct default models per provider
+- **Requirements panel**: removed cluttered workflow step chips (1 INPUT / 2 STANDARDS / 3 PARAMETERS / 4 CAD)
+- **Variant dropdown**: hidden for non-bottle product types
+- **Specs panel header**: shows design title instead of "Bottle parameters"
+- **Model bar**: shows family label + param count instead of stale material/"Optional"
+- **Error messages**: raw multi-line API error → truncated single line with actionable hint ("Quota exceeded — switch to OpenAI or Claude"), styled in distinct red box
+
+### CSS fixes
+- `label` elements globally inherited `text-transform: uppercase` — everything inside labels (slider values, hint text, morph family descriptions) was SHOUTING
+- Fixed: `.bsl-label` gets `text-transform: none`, `.bsl-val` gets `text-transform: none; letter-spacing: 0`, `.bsl-note` same
+- `.bsl-divider` was heavy all-caps → reduced to light normal-case separator
+- Label hint spans in model panel now have `text-transform:none;letter-spacing:0` inline to prevent inheritance
+- Morph family row: removed redundant value badge (the select already shows the family name)
+- `bsl-dividers` renamed: "Editable body parameters" → "Body parameters", "Locked norms" → "Locked specs"
+
+### 3D viewer improvement
+- Bottle geometry now applies oval squeeze when `bodyDepth ≠ bodyDiameter` — previously always circular
+
+### Default state cleanup
+- `bridge.status` default: `"Optional"` → `"Not connected"`
+- Bridge/cloud status messages: removed 3DEXPERIENCE-specific copy
+
+---
+
+## What still needs to be done
+
+### HIGH PRIORITY
+
+**1. AI key situation — Gemini free quota is hit**  
+Kabir's Gemini free-tier key is exhausted. Options:
+- Add a server-side AI proxy endpoint (backend holds the key, browser calls `/api/copilot`) — no per-user key needed
+- Or tell Kabir to add an OpenAI or Claude key via the AI Provider dropdown
+- The `callAiEndpoint()` function already supports a custom bridge endpoint — just needs a deployed backend
+
+**2. 3D viewer doesn't show surface features**  
+Ribs (`ribCount`/`ribDepth`), facets (`facetCount`/`facetDepth`), helix ridges — none appear in Three.js preview. The viewer only shows the lathe revolution profile.  
+Fix paths:
+- Option A: Deploy `cad-server/` to Render.com — it returns a real STL. Paste the URL into "Geometry server" field in the dashboard. The `mount3DViewer()` will fetch it automatically.
+- Option B: Add Three.js surface deformation to `build3DGeometry()` for bottle — create rib indentations using vertex displacement along the lathe profile. Hard but no server needed.
+
+**3. Deploy cad-server to Render.com**
+```sh
+# Already configured in render.yaml:
+# - name: solidworks-cad-server
+# - buildCommand: pip install -r cad-server/requirements.txt  
+# - startCommand: uvicorn cad-server.main:app --host 0.0.0.0 --port $PORT
+# - healthCheckPath: /health
+```
+Go to render.com → New Web Service → connect `kabirspatel/solidworks-ai-cad-studio` → deploy.  
+After deploy, copy the URL (e.g. `https://solidworks-cad-server.onrender.com`) → paste into dashboard "Geometry server" field → save → 3D viewer will fetch real STL.  
+Note: free tier sleeps after 15 min, first request takes ~30s to wake.
+
+**4. Standards constraints not in VBA macro**  
+`lookupStandards()` finds applicable standards and shows them in the UI. Selected standards generate constraints (`buildStandardsConstraints()`). But `downloadSolidWorksMacro()` doesn't include them.  
+Fix: Add a VB comment block to the `.swb` file listing the selected standards and their key constraints.
+
+### MEDIUM PRIORITY
+
+**5. State bleed between products**  
+If user previously worked on a bottle and now types "create house", the bottle sliders still show because `state.concept.family === "bottle"` persists in localStorage. Switching product type should clear/reset `state.concept` and `state.parameters`.  
+Fix: In `syncDraftFromDom()`, when `templateSelect` changes to a different family, reset `state.concept` and `state.parameters` to defaults for that family.
+
+**6. Morph slider overwrites manual edits**  
+If user manually edits a slider value, then drags the morph position slider, all manual edits are overwritten by the interpolated values. This is jarring.  
+Fix: Add a "lock" toggle per slider — locked sliders are excluded from morph interpolation.
+
+**7. MCP server not connected**  
+`bridge/McpServer/server.mjs` exists as a JSON-RPC 2.0 stdio server. If wired to a Claude Code session, Claude could call tools that directly push parameters to SolidWorks during prompting.  
+To activate: run the MCP server, add it to `.claude/settings.json` under `mcpServers`. This would let Kabir use Claude Code itself as the AI that drives the dashboard parameters.
+
+**8. AI parse failures need better fallback**  
+When AI returns prose instead of JSON, `parseJsonFromText()` throws "AI returned text instead of model JSON."  
+Fix: On parse failure, try to extract the reply as a plain text message and display it in the AI output box rather than showing a red error box. Only show error box for network/auth failures.
+
+**9. localStorage migration**  
+State is versioned at `solidworks-ai-cad-studio-v4`. If schema changes break old saved state (missing fields), `normalizeState()` fills defaults — but this doesn't always work cleanly.  
+Fix: Add a schema version check in `normalizeState()` that fully resets state if the major structure doesn't match.
+
+### LOW PRIORITY / NICE TO HAVE
+
+**10. BOTTLE_LOCKS are still project-specific**  
+Lines ~335 in app.js. The "Locked specs" section in the bottle slider panel hardcodes things like "28 mm OD / 21 mm mouth ID" neck finish. These should either be configurable or loaded from the selected variant.
+
+**11. Macro parameter key sanitization**  
+`downloadSolidWorksMacro()` does basic VBA string escaping but parameter keys from AI-generated state could contain characters that break VBA syntax. Add a `sanitizeVbaIdentifier(key)` function.
+
+**12. No mobile layout**  
+The 4-panel grid is desktop-only. On mobile it stacks but overflows badly. Not a priority unless demoing on phone.
+
+**13. Export JSON includes local-estimate analysis**  
+The `makeCurrentModelPayload()` includes `state.analysis` which contains local FEA/material estimates. A consumer of the exported JSON might think these are real values.  
+Fix: Strip `analysis` from export or tag every field with `"source": "local-estimate"`.
+
+**14. CloudBroker real API integration**  
+`bridge/CloudBroker/server.mjs` has placeholder OAuth endpoints. Requires:
+- Dassault developer account
+- 3DEXPERIENCE OAuth client credentials  
+- Actual API to create models/upload files in a 3DEXPERIENCE tenant  
+This is blocked on Kabir getting API access — can't be coded without credentials.
+
+---
+
+## Key constants in app.js
+
+```javascript
+// Line 4
+const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
+const SESSION_AI_KEY = "sw-ai-key";          // OpenAI key in sessionStorage
+const SESSION_CLAUDE_KEY = "sw-claude-key";   // Claude key in sessionStorage
+const SESSION_GEMINI_KEY = "sw-gemini-key";   // Gemini key in sessionStorage
+const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_BRIDGE_URL = "";               // http://127.0.0.1:8787 when bridge is running
+const DEFAULT_AI_ENDPOINT = "";
+const DEFAULT_CLOUD_SPACE_URL = "";
+
+// Line 275 — 25 bottle variants with full parameter sets
+const BOTTLE_VARIANTS = [ ... ]; // B01–B25
+
+// Line ~320 — 15 slider configs
+const BOTTLE_SLIDER_CONFIG = [ ... ];
+
+// Line ~355 — 5 morph families
+const BOTTLE_MORPH_FAMILIES = { ... };
+
+// Line ~335 — locked specs shown in slider panel
+const BOTTLE_LOCKS = [ ... ];
 ```
 
-GitHub Pages deploys from `main` automatically. Takes ~60 seconds.
+---
+
+## AI system prompt structure (what gets sent to AI)
+
+`makeAiInstruction()` returns the system prompt. It includes:
+- Product family context
+- SolidWorks dimension name format
+- JSON schema the AI must return (title, family, material, parameters array, requirements, features, solidworksIntent)
+- Selected standards and their constraints
+- Current parameters (for revision context)
+
+`makeCurrentModelPayload()` is the user message — full current state as JSON.
+
+The AI must return a JSON object matching the schema. `parseJsonFromText()` strips markdown code fences then parses. On success, `applyAiPayload()` → `updateFromBlueprint()` updates state.
 
 ---
 
-## AI keys
-
-Keys are entered in the AI Copilot panel and stored in `sessionStorage` only:
-
-| Provider | Key format | Where to get |
-|----------|-----------|--------------|
-| Gemini | `AIza…` | https://aistudio.google.com/app/apikey (free) |
-| Claude | `sk-ant-…` | https://console.anthropic.com |
-| OpenAI | `sk-…` | https://platform.openai.com/api-keys |
-
-Default models: `gemini-2.0-flash`, `claude-sonnet-4-6`, `gpt-4o-mini`
-
----
-
-## State storage
-
-- `localStorage` key: `solidworks-ai-cad-studio-v4`
-- Contains: all parameters, requirements, AI settings, bridge URLs, geometry server URL, revision number, morph state, standards selections
-- API keys: `sessionStorage` only (3 separate keys)
-- Reset: click "Reset" in requirements panel, or clear `localStorage` in DevTools
-
----
-
-## SolidWorks connectivity — honest summary
+## SolidWorks connectivity: honest summary
 
 | Path | Requires | Status |
 |------|----------|--------|
-| **VBA macro (.swb)** | SolidWorks installed (any platform) | ✅ Working — download and run via Tools → Macros |
-| **MacDevBridge** | Node.js on Mac | ✅ Working — local bridge, returns mock analysis |
-| **Windows SolidWorksBridge** | Windows + .NET + SolidWorks | Scaffold only — COM calls not tested |
-| **Direct browser embed** | Nothing | ✗ Impossible — browser cannot control desktop SolidWorks |
-| **3DEXPERIENCE/xDesign** | Dassault OAuth credentials | Scaffold only — no real API integration |
+| **VBA macro (.swb)** | SolidWorks installed, any platform | ✅ Working |
+| **MacDevBridge** | Node.js on Mac | ✅ Working (returns mock data) |
+| **MCP server** | Node.js + Claude Code | Exists, not wired |
+| **Windows SolidWorksBridge** | Windows + .NET + SolidWorks | Scaffold only |
+| **3DEXPERIENCE / xDesign** | Dassault OAuth credentials | Scaffold only |
+| **Direct browser embed** | — | Impossible |
 
-The VBA macro path is the only currently functional SolidWorks integration. It is also the most practical for Georgia Tech student license users who have SolidWorks on Windows but work on Mac.
-
----
-
-## Known issues / next steps
-
-### High priority
-1. **MCP server** (`bridge/McpServer/server.mjs`) — exists but never wired to the dashboard. This would allow Claude to call tools that push to SolidWorks directly during a Claude Code session. To activate: run the MCP server, configure it in Claude Code settings, then use it as a tool during prompting.
-
-2. **3D viewer doesn't show ribs/facets** — the `LatheGeometry` is a solid of revolution and can't represent surface features. The viewer shows overall proportions but not rib count, facet panels, or helix ridges. Fix options:
-   - Deploy the cad-server and configure it — it generates STL with actual geometry for the server-side path
-   - Or add a note/badge in the viewer overlay ("Surface features visible in SolidWorks only")
-
-3. **Bottle morph family interpolation uses seed data but ignores non-variant sliders** — if you manually edit a slider after loading a variant, then drag the morph slider, manual edits are overwritten. This is a UX issue.
-
-4. **Key persistence across renders** — if anything triggers a full `render()` while the user has typed a key but not yet clicked "Generate", the key field clears (it re-renders empty). User must type the key and immediately click Generate without doing anything else that triggers a re-render.
-
-### Medium priority
-5. **`cad-server/main.py` STL quality** — the bottle STL is a lathe revolution without surface features. Needs numpy or shapely-based rib/facet geometry.
-
-6. **Standards constraints not fed to VBA macro** — selected standards' constraints (character limits, test notes) appear in the specs panel but are not included in the `.swb` macro output.
-
-7. **Export JSON payload** includes analysis fields that are just local estimates — these could mislead a downstream consumer. Consider stripping `analysis` from the exported JSON or tagging fields as `"source": "local-estimate"`.
-
-### Nice to have
-8. **BOTTLE_LOCKS** constants in `app.js` (lines ~335) still reference specific material terms. These only appear in the bottle slider panel's "Locked norms" section — acceptable for now but should become configurable.
-
-9. **Image geometry extraction** (`handleImageUpload`) — browser-side canvas pixel analysis. Works as a rough contour capture but is not a real photogrammetry pipeline.
+**The VBA macro is the only real SolidWorks integration path today.**
 
 ---
 
-## App architecture in one paragraph
-
-`app.js` is a ~3000-line single-file app. State lives in a global `state` object (serialized to `localStorage`). `render()` re-draws all 4 panels by setting innerHTML. The 3D viewer (`mount3DViewer`) is mounted after each render via `requestAnimationFrame` and reuses the Three.js scene across renders via a module-level `_three` variable. Bottle sliders use live `input` events that update `state.parameters` and call `saveOnly()` (direct `localStorage.setItem`) without triggering a full re-render, keeping the viewport responsive during slider drag. AI calls flow through `askCopilot()` → `callOpenAI/callClaude/callGemini()` → `updateFromBlueprint()` → `persist()` → `render()`.
-
----
-
-## Best continuation prompt
+## Best continuation prompt for a new session
 
 ```
 You are continuing work on SolidWorks AI CAD Studio.
+
 Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
+Latest commit: 483373b (v=11 in index.html)
 
-Read CLAUDE_HANDOFF.md first for full current state.
+Read CLAUDE_HANDOFF.md first for full current state, what works, and what needs to be done.
 
 The app is a static HTML/CSS/JS dashboard — no build step.
-Run locally: python3 -m http.server 5174 (from the repo root)
-Deploy: git add app.js index.html styles.css && git commit && git push origin main
+Run locally: cd to the repo root, then: python3 -m http.server 5174 --bind 127.0.0.1
+Deploy: git add app.js index.html styles.css CLAUDE_HANDOFF.md && git commit -m "..." && git push origin main
 
 Key files:
-- app.js: all logic (~3000 lines), one global `state` object
+- app.js: all logic (~3000 lines), global `state` object, render functions, AI calls, 3D viewer
 - styles.css: all styles
-- cad-server/main.py: FastAPI geometry server (deploy to Render.com for real STL)
-- bridge/MacDevBridge/server.mjs: local Node bridge for SolidWorks simulation
+- cad-server/main.py: FastAPI geometry server (needs deploying to Render.com)
+- bridge/MacDevBridge/server.mjs: local Node bridge for SolidWorks testing on Mac
 
-What works: AI copilot (Gemini/Claude/OpenAI all wired), bottle parametric sliders,
-Three.js 3D preview, VBA macro push to SolidWorks, standards matching, CSV export.
+What works: AI copilot (Gemini/Claude/OpenAI all correct), bottle parametric sliders,
+Three.js 3D preview, VBA macro push to SolidWorks, standards matching, CSV/JSON export.
 
-What doesn't: FEA/optimization/LCA are local estimates only. No real Dassault API.
-The VBA macro is the only real SolidWorks path.
+Highest priority next tasks:
+1. Deploy cad-server/ to Render.com for real 3D mesh (render.yaml already configured)
+2. Connect MCP server (bridge/McpServer/server.mjs) to enable Claude-native parameter control
+3. Add server-side AI proxy so users don't need their own API keys
+4. Fix state bleed between products (switching template should reset concept + parameters)
+5. Add selected standards constraints to VBA macro export
 
-Current JS version tag in index.html: v=10
-Bump this after each significant change to force cache bust on GitHub Pages.
+Bump ?v=N in index.html after each significant change (currently v=11).
 ```
