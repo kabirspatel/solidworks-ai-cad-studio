@@ -591,6 +591,10 @@ function toSolidWorksDimensionName(parameter, index) {
   return `D${index + 1}@${clean}`;
 }
 
+function escapeVbaString(value = "") {
+  return String(value).replace(/"/g, '""').replace(/\r?\n/g, " ");
+}
+
 function round(value, digits = 1) {
   const multiplier = 10 ** digits;
   return Math.round(Number(value) * multiplier) / multiplier;
@@ -638,13 +642,17 @@ function matchStandards(family, material) {
   });
 }
 
+function getSelectedStandards() {
+  const selected = new Set(state.standards?.selected || []);
+  return (state.standards?.matched || []).filter(s => selected.has(s.id));
+}
+
 function buildStandardsConstraints() {
-  const active = (state.standards?.matched || []).filter(s => (state.standards?.selected || []).includes(s.id));
-  return active.flatMap(s => s.constraints || []).map(c => `- ${c.param}: ${c.rule}`);
+  return getSelectedStandards().flatMap(s => s.constraints || []).map(c => `- ${c.param}: ${c.rule}`);
 }
 
 function buildStandardsLabelText() {
-  const active = (state.standards?.matched || []).filter(s => (state.standards?.selected || []).includes(s.id) && s.labelRequired);
+  const active = getSelectedStandards().filter(s => s.labelRequired);
   return [...new Set(active.map(s => s.labelRequired))].join("; ");
 }
 
@@ -1234,7 +1242,14 @@ function syncDraftFromDom() {
 
   if (prompt) state.prompt = prompt.value.trim();
   if (requirements) state.requirementText = requirements.value.trim();
-  if (template) state.selectedTemplate = template.value;
+  if (template) {
+    const nextTemplate = template.value;
+    if (nextTemplate !== state.selectedTemplate) {
+      resetModelForTemplate(nextTemplate);
+    } else {
+      state.selectedTemplate = nextTemplate;
+    }
+  }
   if (aiMode) {
     const newMode = aiMode.value;
     if (newMode !== state.ai.mode) {
@@ -1308,6 +1323,15 @@ function updateFromBlueprint(blueprint, source = "Local parser") {
   state.analysis.simulation = null;
   state.analysis.optimization = null;
   state.designTable.rows = buildDesignTableRows();
+}
+
+function resetModelForTemplate(templateValue) {
+  const blueprint = buildModelBlueprint(state.prompt, state.requirementText, templateValue);
+  updateFromBlueprint(blueprint, "Template");
+  state.selectedTemplate = templateValue;
+  state._bottleMorph = null;
+  state.standards = { matched: [], selected: [], note: "" };
+  lookupStandards();
 }
 
 function generateModel() {
@@ -1710,26 +1734,36 @@ function downloadSolidWorksMacro() {
   const params = state.parameters.filter(p => p.unit !== "count");
   const countParams = state.parameters.filter(p => p.unit === "count");
   const ts = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const selectedStandards = getSelectedStandards();
 
   const varLines = params.map(p => {
     const val = Number(p.value);
     const mm = p.unit === "mm" ? "mm" : "";
-    return `    eqMgr.Add2 -1, "${'"'}${p.key}${'"'} = ${val}${mm}", True   '${p.label}`;
+    return `    eqMgr.Add2 -1, "${'"'}${escapeVbaString(p.key)}${'"'} = ${val}${mm}", True   '${escapeVbaString(p.label)}`;
   }).join("\n");
 
   const countLines = countParams.map(p =>
-    `    eqMgr.Add2 -1, "${'"'}${p.key}${'"'} = ${Number(p.value)}", True   '${p.label}`
+    `    eqMgr.Add2 -1, "${'"'}${escapeVbaString(p.key)}${'"'} = ${Number(p.value)}", True   '${escapeVbaString(p.label)}`
   ).join("\n");
 
   const dimHints = state.parameters.map(p =>
-    `'   ${p.swDimension || p.key} = ${p.value} ${p.unit}  (parameter: "${p.key}")`
+    `'   ${escapeVbaString(p.swDimension || p.key)} = ${p.value} ${p.unit}  (parameter: "${escapeVbaString(p.key)}")`
   ).join("\n");
+
+  const standardHints = selectedStandards.length
+    ? selectedStandards.flatMap(standard => [
+        `'   ${escapeVbaString(standard.id)} - ${escapeVbaString(standard.title)}${standard.category ? ` (${escapeVbaString(standard.category)})` : ""}`,
+        ...(standard.constraints || []).map(c => `'      * ${escapeVbaString(c.param)}: ${escapeVbaString(c.rule)}`),
+        standard.testRequired ? `'      Test: ${escapeVbaString(standard.testRequired)}` : "",
+        standard.labelRequired ? `'      Label: ${escapeVbaString(standard.labelRequired)}` : ""
+      ].filter(Boolean)).join("\n")
+    : "'   None selected";
 
   const macro = `' ==========================================================
 ' SolidWorks AI CAD Studio — Auto-generated macro
-' Project : ${title}
-' Family  : ${state.concept.familyLabel || ""}
-' Material: ${state.concept.material || ""}
+' Project : ${escapeVbaString(title)}
+' Family  : ${escapeVbaString(state.concept.familyLabel || "")}
+' Material: ${escapeVbaString(state.concept.material || "")}
 ' Generated: ${ts}
 '
 ' HOW TO RUN:
@@ -1745,6 +1779,9 @@ function downloadSolidWorksMacro() {
 '
 ' Expected dimension names (swDimension @ feature):
 ${dimHints}
+'
+' Selected standards and CAD constraints:
+${standardHints}
 ' ==========================================================
 
 Dim swApp As Object
@@ -1770,7 +1807,7 @@ Sub main()
             Dim existing As String
             existing = eqMgr.Equation(i)
             ' Check if this is one of our keys
-            ${state.parameters.map(p => `If InStr(existing, "${'"'}${p.key}${'"'}") > 0 Then eqMgr.Delete i`).join("\n            ")}
+            ${state.parameters.map(p => `If InStr(existing, "${'"'}${escapeVbaString(p.key)}${'"'}") > 0 Then eqMgr.Delete i`).join("\n            ")}
         End If
     Next i
 

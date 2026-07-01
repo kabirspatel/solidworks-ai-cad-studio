@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest commit:** `483373b` (v=11)
+**Latest commit:** pending current commit (v=12)
 
 ---
 
@@ -172,6 +172,12 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - `bridge.status` default: `"Optional"` → `"Not connected"`
 - Bridge/cloud status messages: removed 3DEXPERIENCE-specific copy
 
+### Follow-up fixes after handoff
+- **State bleed between products fixed**: changing `templateSelect` now regenerates concept, parameters, design table rows, material assessment, SolidWorks target document, standards, and bottle morph state through `resetModelForTemplate()`.
+- **Standards constraints added to VBA macro export**: `downloadSolidWorksMacro()` now includes selected standards, constraints, test notes, and label notes as a comment block in the generated `.swb`.
+- **Macro text escaping hardened**: generated macro strings now escape double quotes and newlines in project/material/parameter/standard text.
+- **Cache bust bumped**: `index.html` now loads `app.js?v=12`.
+
 ---
 
 ## What still needs to be done
@@ -202,48 +208,40 @@ Go to render.com → New Web Service → connect `kabirspatel/solidworks-ai-cad-
 After deploy, copy the URL (e.g. `https://solidworks-cad-server.onrender.com`) → paste into dashboard "Geometry server" field → save → 3D viewer will fetch real STL.  
 Note: free tier sleeps after 15 min, first request takes ~30s to wake.
 
-**4. Standards constraints not in VBA macro**  
-`lookupStandards()` finds applicable standards and shows them in the UI. Selected standards generate constraints (`buildStandardsConstraints()`). But `downloadSolidWorksMacro()` doesn't include them.  
-Fix: Add a VB comment block to the `.swb` file listing the selected standards and their key constraints.
-
 ### MEDIUM PRIORITY
 
-**5. State bleed between products**  
-If user previously worked on a bottle and now types "create house", the bottle sliders still show because `state.concept.family === "bottle"` persists in localStorage. Switching product type should clear/reset `state.concept` and `state.parameters`.  
-Fix: In `syncDraftFromDom()`, when `templateSelect` changes to a different family, reset `state.concept` and `state.parameters` to defaults for that family.
-
-**6. Morph slider overwrites manual edits**  
+**4. Morph slider overwrites manual edits**
 If user manually edits a slider value, then drags the morph position slider, all manual edits are overwritten by the interpolated values. This is jarring.  
 Fix: Add a "lock" toggle per slider — locked sliders are excluded from morph interpolation.
 
-**7. MCP server not connected**  
+**5. MCP server not connected**
 `bridge/McpServer/server.mjs` exists as a JSON-RPC 2.0 stdio server. If wired to a Claude Code session, Claude could call tools that directly push parameters to SolidWorks during prompting.  
 To activate: run the MCP server, add it to `.claude/settings.json` under `mcpServers`. This would let Kabir use Claude Code itself as the AI that drives the dashboard parameters.
 
-**8. AI parse failures need better fallback**  
+**6. AI parse failures need better fallback**
 When AI returns prose instead of JSON, `parseJsonFromText()` throws "AI returned text instead of model JSON."  
 Fix: On parse failure, try to extract the reply as a plain text message and display it in the AI output box rather than showing a red error box. Only show error box for network/auth failures.
 
-**9. localStorage migration**  
+**7. localStorage migration**
 State is versioned at `solidworks-ai-cad-studio-v4`. If schema changes break old saved state (missing fields), `normalizeState()` fills defaults — but this doesn't always work cleanly.  
 Fix: Add a schema version check in `normalizeState()` that fully resets state if the major structure doesn't match.
 
 ### LOW PRIORITY / NICE TO HAVE
 
-**10. BOTTLE_LOCKS are still project-specific**  
+**8. BOTTLE_LOCKS are still project-specific**
 Lines ~335 in app.js. The "Locked specs" section in the bottle slider panel hardcodes things like "28 mm OD / 21 mm mouth ID" neck finish. These should either be configurable or loaded from the selected variant.
 
-**11. Macro parameter key sanitization**  
+**9. Macro parameter key sanitization**
 `downloadSolidWorksMacro()` does basic VBA string escaping but parameter keys from AI-generated state could contain characters that break VBA syntax. Add a `sanitizeVbaIdentifier(key)` function.
 
-**12. No mobile layout**  
+**10. No mobile layout**
 The 4-panel grid is desktop-only. On mobile it stacks but overflows badly. Not a priority unless demoing on phone.
 
-**13. Export JSON includes local-estimate analysis**  
+**11. Export JSON includes local-estimate analysis**
 The `makeCurrentModelPayload()` includes `state.analysis` which contains local FEA/material estimates. A consumer of the exported JSON might think these are real values.  
 Fix: Strip `analysis` from export or tag every field with `"source": "local-estimate"`.
 
-**14. CloudBroker real API integration**  
+**12. CloudBroker real API integration**
 `bridge/CloudBroker/server.mjs` has placeholder OAuth endpoints. Requires:
 - Dassault developer account
 - 3DEXPERIENCE OAuth client credentials  
@@ -257,9 +255,9 @@ This is blocked on Kabir getting API access — can't be coded without credentia
 ```javascript
 // Line 4
 const STORAGE_KEY = "solidworks-ai-cad-studio-v4";
-const SESSION_AI_KEY = "sw-ai-key";          // OpenAI key in sessionStorage
-const SESSION_CLAUDE_KEY = "sw-claude-key";   // Claude key in sessionStorage
-const SESSION_GEMINI_KEY = "sw-gemini-key";   // Gemini key in sessionStorage
+const SESSION_AI_KEY = "solidworks-ai-openai-key";      // OpenAI key in sessionStorage
+const SESSION_CLAUDE_KEY = "solidworks-ai-claude-key";  // Claude key in sessionStorage
+const SESSION_GEMINI_KEY = "solidworks-ai-gemini-key";  // Gemini key in sessionStorage
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_BRIDGE_URL = "";               // http://127.0.0.1:8787 when bridge is running
 const DEFAULT_AI_ENDPOINT = "";
@@ -317,7 +315,7 @@ You are continuing work on SolidWorks AI CAD Studio.
 
 Local path: /Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio
 GitHub Pages: https://kabirspatel.github.io/solidworks-ai-cad-studio/
-Latest commit: 483373b (v=11 in index.html)
+Latest commit: pending current commit (v=12 in index.html)
 
 Read CLAUDE_HANDOFF.md first for full current state, what works, and what needs to be done.
 
@@ -338,8 +336,8 @@ Highest priority next tasks:
 1. Deploy cad-server/ to Render.com for real 3D mesh (render.yaml already configured)
 2. Connect MCP server (bridge/McpServer/server.mjs) to enable Claude-native parameter control
 3. Add server-side AI proxy so users don't need their own API keys
-4. Fix state bleed between products (switching template should reset concept + parameters)
-5. Add selected standards constraints to VBA macro export
+4. Add bottle surface features to either cad-server STL output or Three.js fallback preview
+5. Add morph-slider parameter locks so manual slider edits are not overwritten
 
-Bump ?v=N in index.html after each significant change (currently v=11).
+Bump ?v=N in index.html after each significant change (currently v=12).
 ```
