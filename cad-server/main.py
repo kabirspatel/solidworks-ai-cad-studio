@@ -7,7 +7,12 @@ from fastapi import FastAPI
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
+import asyncio
+import json
+import os
 import struct
+import urllib.error
+import urllib.request
 
 app = FastAPI(title="SolidWorks AI CAD Server")
 
@@ -238,11 +243,81 @@ BUILDERS = {
 }
 
 
+# ── AI proxy helpers ─────────────────────────────────────────────────────────
+
+def parse_json_text(text):
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:].strip()
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(cleaned[start:end + 1])
+        raise ValueError("AI returned text instead of model JSON.")
+
+
+def call_openai_copilot(body, api_key):
+    payload = {
+        "model": body.get("model") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+        "max_tokens": 1600,
+        "messages": [
+            {
+                "role": "system",
+                "content": body.get("instructions") or "Return only valid JSON for a SolidWorks CAD model.",
+            },
+            {
+                "role": "user",
+                "content": json.dumps(body.get("payload") or {}, indent=2),
+            },
+        ],
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(detail or f"OpenAI request failed ({exc.code})")
+
+    text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+    return parse_json_text(text)
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "CAD geometry server"}
+    return {
+        "status": "ok",
+        "service": "CAD geometry server",
+        "aiProxy": bool(os.environ.get("OPENAI_API_KEY")),
+    }
+
+
+@app.post("/api/copilot")
+async def copilot(body: dict):
+    """Server-side AI proxy so GitHub Pages does not need browser-stored shared keys."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return {
+            "error": "OPENAI_API_KEY is not configured on this server.",
+            "reply": "AI proxy is reachable, but no server-side OpenAI key is configured.",
+        }
+
+    return await asyncio.to_thread(call_openai_copilot, body, api_key)
 
 
 @app.post("/api/generate")

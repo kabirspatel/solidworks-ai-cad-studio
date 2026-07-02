@@ -421,23 +421,24 @@ async function runCopilot(requestBody) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return localCopilotResponse(requestBody.payload || {});
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: requestBody.model || "gpt-5-mini",
-      store: false,
-      instructions: requestBody.instructions,
-      input: JSON.stringify(requestBody.payload || {}, null, 2),
-      max_output_tokens: 1600
+      model: requestBody.model || "gpt-4o-mini",
+      max_tokens: 1600,
+      messages: [
+        { role: "system", content: requestBody.instructions || "Return valid JSON for the CAD model." },
+        { role: "user", content: JSON.stringify(requestBody.payload || {}, null, 2) }
+      ]
     })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error?.message || `OpenAI request failed (${response.status})`);
-  return parseJson(extractResponseText(data));
+  return parseJson(data.choices?.[0]?.message?.content || "");
 }
 
 function localCopilotResponse(payload) {

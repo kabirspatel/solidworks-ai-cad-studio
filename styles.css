@@ -396,6 +396,90 @@ textarea {
   line-height: 1.35;
 }
 
+.route-grid,
+.portal-grid,
+.library-grid,
+.link-grid,
+.lca-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.route-grid,
+.portal-grid,
+.library-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.route-card,
+.portal-card,
+.library-card,
+.tool-link,
+.lca-score {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: inherit;
+  background: white;
+  text-decoration: none;
+}
+
+.route-card.active {
+  border-color: rgba(44, 107, 79, .32);
+  background: #f0f7f5;
+}
+
+.route-card span,
+.portal-card span,
+.library-card span,
+.lca-score span {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.route-card strong,
+.library-card strong,
+.tool-link strong,
+.lca-score strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.route-card p,
+.portal-card p,
+.library-card p,
+.tool-link span,
+.lca-score p,
+.ip-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.library-card em {
+  color: var(--quiet);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.tool-link:hover {
+  border-color: var(--tool);
+  background: #f3f8f6;
+}
+
+.ip-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .settings-details {
   padding: 10px;
   border: 1px solid var(--line);
@@ -415,6 +499,11 @@ textarea {
 .settings-grid {
   display: grid;
   gap: 10px;
+  margin-top: 10px;
+}
+
+.route-details .button-row,
+.lca-details .button-row {
   margin-top: 10px;
 }
 
@@ -904,6 +993,10 @@ td code {
   .bridge-strip,
   .preview-telemetry,
   .upload-grid,
+  .route-grid,
+  .portal-grid,
+  .library-grid,
+  .lca-grid,
   .fea-grid,
   .intake-grid,
   .agent-grid,

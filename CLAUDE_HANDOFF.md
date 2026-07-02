@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=15 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=16 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=15) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=16) to force GitHub Pages cache bust.
 
 ---
 
@@ -191,6 +191,13 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **CAD section simplified**: preview is primary; SolidWorks push, macro export, design-table export, and preview refresh are the main actions; bridge/server/cloud settings are collapsed.
 - **FEA panel restored**: run simulation and suggest geometry updates are visible again with safety factor, mass index, source, and recommendation readouts.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=15`.
+- **AI route troubleshooting added**: AI panel now shows local/browser-key/proxy/native routes, includes "Use bridge AI proxy", and checks bridge proxy health.
+- **Bridge AI proxy fixed**: `bridge/MacDevBridge/server.mjs` now uses OpenAI Chat Completions with `gpt-4o-mini` instead of the old Responses payload.
+- **Deployable AI proxy added**: `cad-server/main.py` now exposes `/api/copilot` and reports `aiProxy` from `/health`; set `OPENAI_API_KEY` on Render to make the public dashboard generative without browser keys.
+- **CAD portal clarified**: CAD panel now displays display/import/export/automation lanes and adds bridge viewer + STL export actions.
+- **Requirements library and patent/IP panel added**: Legal panel now shows current-family standards library entries and prior-art search links generated from the current idea.
+- **LCA handoff added**: FEA panel now includes material/LCA screening plus links to SOLIDWORKS Simulation, SOLIDWORKS Help, and SOLIDWORKS AI overview.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=16`.
 
 ---
 

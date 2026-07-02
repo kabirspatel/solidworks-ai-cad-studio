@@ -384,6 +384,38 @@ const AGENT_LANES = [
   { key: "lca", label: "LCA", role: "Compare sustainability and end-of-life impact." }
 ];
 
+const AI_ROUTE_LIBRARY = [
+  ["Fastest prototype", "Local parser", "Always works, but only extracts deterministic parameters from the prompt."],
+  ["Working AI today", "Browser key", "User enters Gemini, Claude, or OpenAI key for this tab. Good for demos, not shared production."],
+  ["Production route", "Server proxy", "Dashboard calls /api/copilot on a backend; backend stores the AI key and returns model JSON."],
+  ["Native future", "SOLIDWORKS AI", "Use SOLIDWORKS Design AI companions when available in the licensed CAD environment."]
+];
+
+const CAD_PORTAL_LANES = [
+  ["Display", "Three.js preview, bridge iframe, or pasted cloud CAD viewer URL."],
+  ["Import", "SolidWorks macro download or bridge POST to /api/model."],
+  ["Export", "SolidWorks macro, design-table CSV, JSON payload, and STL when a CAD server is configured."],
+  ["Automate", "Windows SolidWorks host must run COM automation for true live model edits."]
+];
+
+const LCA_TOOL_LINKS = [
+  {
+    label: "SOLIDWORKS Simulation",
+    url: "https://www.solidworks.com/domain/simulation",
+    note: "Use for structural validation, FEA, plastics, CFD, and simulation workflows tied to CAD geometry."
+  },
+  {
+    label: "SOLIDWORKS Help",
+    url: "https://help.solidworks.com/",
+    note: "Search for Sustainability, SustainabilityXpress, material impact, and environmental reports in your installed version."
+  },
+  {
+    label: "SOLIDWORKS AI overview",
+    url: "https://www.solidworks.com/product/solidworks-design/ai-overview",
+    note: "Reference for native AI direction inside SOLIDWORKS Design; dashboard proxy remains separate."
+  }
+];
+
 const CAD_LIBRARY = {
   enclosure: {
     label: "Enclosure",
@@ -1303,6 +1335,60 @@ function imageIdeaSummary() {
   });
 }
 
+function ideaSearchQuery() {
+  const intent = deriveDesignIntent();
+  const parts = [
+    state.concept?.title,
+    intent.familyLabel,
+    intent.material,
+    ...(intent.features || []).slice(0, 3),
+    ...(intent.requirements || []).slice(0, 2)
+  ].filter(Boolean);
+  const query = parts.join(" ").replace(/\s+/g, " ").trim();
+  return query || "parametric CAD product design";
+}
+
+function patentSearchLinks() {
+  const query = ideaSearchQuery();
+  const encoded = encodeURIComponent(query);
+  return [
+    ["Google Patents", `https://patents.google.com/?q=${encoded}`, "Fast broad prior-art scan"],
+    ["USPTO Patent Center", "https://patentcenter.uspto.gov/", "US filing and application portal"],
+    ["USPTO Patent Public Search", "https://ppubs.uspto.gov/pubwebapp/", "Official US patent search"],
+    ["Espacenet", `https://worldwide.espacenet.com/patent/search?q=${encoded}`, "International patent literature"],
+    ["The Lens", `https://www.lens.org/lens/search/patent/list?q=${encoded}`, "Patent and scholarly landscape"]
+  ];
+}
+
+function currentRequirementLibrary() {
+  const intent = deriveDesignIntent();
+  const bank = STANDARDS_LIBRARY[intent.family] || STANDARDS_LIBRARY.assembly || {};
+  const groups = [];
+  for (const [materialKey, entries] of Object.entries(bank)) {
+    for (const entry of entries || []) {
+      groups.push({
+        ...entry,
+        libraryGroup: materialKey === "all" ? "Baseline" : materialKey
+      });
+    }
+  }
+  return groups;
+}
+
+function bridgeAiEndpoint() {
+  const base = state.bridge?.url ? normalizeBaseUrl(state.bridge.url) : "http://127.0.0.1:8787";
+  return `${base}/api/copilot`;
+}
+
+function aiRouteStatus() {
+  if (state.ai.mode === "parser") return ["Local parser", "Works offline, but not generative AI."];
+  if (state.ai.mode === "bridge") return ["Server proxy", state.ai.endpoint ? state.ai.endpoint : "Endpoint URL required."];
+  if (state.ai.mode === "gemini") return ["Browser Gemini key", sessionStorage.getItem(SESSION_GEMINI_KEY) ? "Key loaded for this tab." : "Paste a Gemini API key."];
+  if (state.ai.mode === "claude") return ["Browser Claude key", sessionStorage.getItem(SESSION_CLAUDE_KEY) ? "Key loaded for this tab." : "Paste an Anthropic key."];
+  if (state.ai.mode === "openai") return ["Browser OpenAI key", sessionStorage.getItem(SESSION_AI_KEY) ? "Key loaded for this tab." : "Paste an OpenAI key."];
+  return ["Unknown", "Select an AI route."];
+}
+
 function syncDraftFromDom() {
   const prompt = document.getElementById("promptInput");
   const requirements = document.getElementById("requirementText");
@@ -1789,6 +1875,7 @@ async function callAiEndpoint() {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || data.message || `AI endpoint failed (${response.status})`);
+  if (data.error) throw new Error(data.error);
   return typeof data === "string" ? parseJsonFromText(data) : data;
 }
 
@@ -1865,6 +1952,58 @@ async function askCopilot() {
     loadingAction = "";
     render();
   }
+}
+
+async function testAiRoute() {
+  syncDraftFromDom();
+  if (state.ai.mode === "parser") {
+    state.ai.status = "Local parser";
+    state.ai.lastReply = "Local parser is available. For real generative AI, choose Custom endpoint and use the bridge /api/copilot proxy, or paste a provider key for this browser tab.";
+    persist("AI route checked");
+    return;
+  }
+
+  if (state.ai.mode === "bridge" && !state.ai.endpoint) {
+    state.ai.endpoint = bridgeAiEndpoint();
+  }
+
+  loadingAction = "test-ai";
+  render();
+
+  try {
+    if (state.ai.mode === "bridge") {
+      const url = new URL(state.ai.endpoint);
+      const healthUrl = url.pathname.endsWith("/api/copilot")
+        ? `${url.origin}/health`
+        : `${url.origin}${url.pathname.replace(/\/api\/copilot$/, "")}/health`;
+      const response = await fetch(healthUrl);
+      if (!response.ok) throw new Error(`Proxy health check failed (${response.status})`);
+      state.ai.status = "Endpoint ready";
+      state.ai.lastReply = `AI proxy route is reachable at ${state.ai.endpoint}. Set OPENAI_API_KEY on the bridge/backend for real generation.`;
+    } else {
+      const [route, detail] = aiRouteStatus();
+      state.ai.status = route;
+      state.ai.lastReply = detail;
+    }
+    persist("AI route checked");
+  } catch (error) {
+    state.ai.status = "AI error";
+    state.ai.lastReply = error.message || "AI route check failed";
+    persist("AI route failed");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+function useBridgeAiProxy() {
+  syncDraftFromDom();
+  state.ai.mode = "bridge";
+  state.ai.endpoint = bridgeAiEndpoint();
+  state.ai.model = state.ai.model || DEFAULT_MODEL;
+  state.ai.status = "Endpoint selected";
+  state.ai.lastReply = `Using bridge AI proxy: ${state.ai.endpoint}. Start the bridge with OPENAI_API_KEY set to make this route generative.`;
+  persist("Bridge AI proxy selected");
 }
 
 function normalizeBaseUrl(value) {
@@ -2041,6 +2180,55 @@ async function sendToSolidWorks() {
     state.bridge.status = "Sync failed";
     state.bridge.lastMessage = error.message;
     persist(error.message);
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+function openBridgeViewer() {
+  syncDraftFromDom();
+  const url = state.bridge.embedUrl || (state.bridge.url ? `${normalizeBaseUrl(state.bridge.url)}/viewer` : "");
+  if (!url) {
+    showToast("Connect the bridge or add a CAD viewer URL first");
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+async function downloadStl() {
+  syncDraftFromDom();
+  const serverUrl = state.cadServer?.url?.trim();
+  if (!serverUrl) {
+    showToast("Add a geometry server URL to export STL");
+    return;
+  }
+
+  loadingAction = "download-stl";
+  render();
+
+  try {
+    const response = await fetch(`${normalizeBaseUrl(serverUrl)}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ family: state.concept.family, parameters: state.parameters })
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(detail || `STL export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${sanitizeFilename(state.concept.title || "cad-model")}.stl`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    showToast("STL exported");
+  } catch (error) {
+    state.cadServer.status = `Error: ${error.message}`;
+    persist("STL export failed");
   } finally {
     loadingAction = "";
     render();
@@ -2349,6 +2537,7 @@ function renderCopilot() {
   const openaiKeyStored = Boolean(sessionStorage.getItem(SESSION_AI_KEY));
   const imageIdeas = imageIdeaSummary();
   const uploadedFiles = state.uploadedFiles || [];
+  const [routeLabel, routeDetail] = aiRouteStatus();
   const modelDefault = state.ai.mode === "gemini" ? "gemini-2.0-flash"
     : state.ai.mode === "claude" ? "claude-sonnet-4-6"
     : state.ai.mode === "openai" ? "gpt-4o-mini"
@@ -2462,6 +2651,28 @@ function renderCopilot() {
               <label for="aiEndpoint">Endpoint URL</label>
               <input id="aiEndpoint" value="${escapeHtml(state.ai.endpoint)}" placeholder="https://your-server.example.com/api/copilot">
             </div>` : ""}
+          </div>
+        </details>
+
+        <details class="settings-details route-details" open>
+          <summary>AI route diagnostics</summary>
+          <div class="route-grid">
+            <div class="route-card active">
+              <span>Active route</span>
+              <strong>${escapeHtml(routeLabel)}</strong>
+              <p>${escapeHtml(routeDetail)}</p>
+            </div>
+            ${AI_ROUTE_LIBRARY.map(([label, route, note]) => `
+              <div class="route-card">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(route)}</strong>
+                <p>${escapeHtml(note)}</p>
+              </div>
+            `).join("")}
+          </div>
+          <div class="button-row">
+            <button class="button secondary" data-action="use-bridge-ai">Use bridge AI proxy</button>
+            <button class="button ghost" data-action="test-ai" ${loadingAction === "test-ai" ? "disabled" : ""}>${loadingAction === "test-ai" ? "Checking..." : "Check AI route"}</button>
           </div>
         </details>
 
@@ -3066,6 +3277,9 @@ function renderRequirements() {
   const intent = deriveDesignIntent();
   const imageIdeas = imageIdeaSummary();
   const matchedStandards = state.standards?.matched?.length ? state.standards.matched : intent.standards;
+  const requirementLibrary = currentRequirementLibrary();
+  const patentLinks = patentSearchLinks();
+  const ipQuery = ideaSearchQuery();
   let selectedStandards = state.standards?.selected?.length ? state.standards.selected : matchedStandards.map(std => std.id);
   if (!matchedStandards.some(std => selectedStandards.includes(std.id))) selectedStandards = matchedStandards.map(std => std.id);
   const activeStandards = matchedStandards.filter(std => selectedStandards.includes(std.id));
@@ -3139,6 +3353,39 @@ function renderRequirements() {
           ` : ""}
         </section>
 
+        <details class="settings-details" open>
+          <summary>Requirements library</summary>
+          <div class="library-grid">
+            ${requirementLibrary.length ? requirementLibrary.map(item => `
+              <div class="library-card">
+                <span>${escapeHtml(item.libraryGroup)} / ${escapeHtml(item.category)}</span>
+                <strong>${escapeHtml(item.id)}</strong>
+                <p>${escapeHtml(item.title)}</p>
+                ${item.scope ? `<em>${escapeHtml(item.scope)}</em>` : ""}
+              </div>
+            `).join("") : `<p class="standards-empty">No requirement library entries found for this product type.</p>`}
+          </div>
+        </details>
+
+        <details class="settings-details" open>
+          <summary>Patents / IP landscape</summary>
+          <div class="ip-panel">
+            <div>
+              <span class="meta-label">Prior-art query</span>
+              <p>${escapeHtml(ipQuery)}</p>
+            </div>
+            <div class="link-grid">
+              ${patentLinks.map(([label, url, note]) => `
+                <a class="tool-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">
+                  <strong>${escapeHtml(label)}</strong>
+                  <span>${escapeHtml(note)}</span>
+                </a>
+              `).join("")}
+            </div>
+            <p class="helper-text">This is a search launcher, not freedom-to-operate advice. A real implementation should add a backend patent API, result scoring, claim clustering, and attorney review workflow.</p>
+          </div>
+        </details>
+
       </div>
     </div>
   `;
@@ -3179,11 +3426,22 @@ function renderModel() {
 
       ${renderPreviewTelemetry()}
 
+      <div class="portal-grid">
+        ${CAD_PORTAL_LANES.map(([label, note]) => `
+          <div class="portal-card">
+            <span>${escapeHtml(label)}</span>
+            <p>${escapeHtml(note)}</p>
+          </div>
+        `).join("")}
+      </div>
+
       <div class="button-row cad-action-row">
         <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""}>Import / push to SolidWorks</button>
         <button class="button secondary" data-action="download-sw-vars">Export SolidWorks macro</button>
         <button class="button secondary" data-action="export-design-table">Export design table</button>
+        <button class="button secondary" data-action="download-stl" ${loadingAction === "download-stl" ? "disabled" : ""}>Export STL</button>
         <button class="button ghost" data-action="show-local-preview">Refresh CAD preview</button>
+        <button class="button ghost" data-action="open-bridge-viewer">Open CAD portal</button>
       </div>
 
       <details class="settings-details">
@@ -3694,6 +3952,26 @@ function renderFea() {
         </div>
       </div>
 
+      <details class="settings-details lca-details" open>
+        <summary>Lifecycle assessment handoff</summary>
+        <div class="lca-grid">
+          <div class="lca-score">
+            <span>Dashboard LCA screen</span>
+            <strong>${escapeHtml(`${material.lca}/100`)}</strong>
+            <p>${escapeHtml(material.decomposition)} end-of-life review. ${escapeHtml(material.recommendation || "")}</p>
+            <button class="button secondary" data-action="material" ${loadingAction === "material" ? "disabled" : ""}>${loadingAction === "material" ? "Assessing..." : "Run material / LCA screen"}</button>
+          </div>
+          <div class="link-grid">
+            ${LCA_TOOL_LINKS.map(link => `
+              <a class="tool-link" href="${escapeHtml(link.url)}" target="_blank" rel="noopener">
+                <strong>${escapeHtml(link.label)}</strong>
+                <span>${escapeHtml(link.note)}</span>
+              </a>
+            `).join("")}
+          </div>
+        </div>
+      </details>
+
       ${recommendations.length ? `
         <div class="recommendation-list">
           <strong>FEA-driven changes</strong>
@@ -3721,10 +3999,14 @@ document.addEventListener("click", event => {
   if (!target) return;
   const action = target.dataset.action;
   if (action === "ask-ai") askCopilot();
+  if (action === "test-ai") testAiRoute();
+  if (action === "use-bridge-ai") useBridgeAiProxy();
   if (action === "generate-model") generateModel();
   if (action === "apply-parameters") applyParameterChanges();
   if (action === "connect-bridge") connectBridge();
   if (action === "send-model") sendToSolidWorks();
+  if (action === "download-stl") downloadStl();
+  if (action === "open-bridge-viewer") openBridgeViewer();
   if (action === "open-cloud") openCloudWorkspace();
   if (action === "show-cloud-frame") showCloudFrame();
   if (action === "show-local-preview") showLocalPreview();
@@ -3748,6 +4030,7 @@ document.addEventListener("click", event => {
   if (action === "download-sw-vars") downloadSolidWorksMacro();
   if (action === "simulate") runSimulation();
   if (action === "optimize") optimizeModel();
+  if (action === "material") assessMaterial();
 });
 
 // ── bottle slider live input ──────────────────────────────────────────────────
