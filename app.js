@@ -576,6 +576,13 @@ function createDefaultState() {
       selected: [],
       note: ""
     },
+    ip: {
+      query: "",
+      status: "Not searched",
+      source: "Search launchers",
+      results: [],
+      lastMessage: "Use the patent/IP panel to launch or run a prior-art search."
+    },
     cadServer: {
       url: "",
       status: "Not configured"
@@ -622,6 +629,11 @@ function normalizeState(saved) {
       ...(saved.standards || {}),
       matched: Array.isArray(saved.standards?.matched) ? saved.standards.matched : defaults.standards.matched,
       selected: Array.isArray(saved.standards?.selected) ? saved.standards.selected : defaults.standards.selected
+    },
+    ip: {
+      ...defaults.ip,
+      ...(saved.ip || {}),
+      results: Array.isArray(saved.ip?.results) ? saved.ip.results : defaults.ip.results
     },
     cadServer: { ...defaults.cadServer, ...(saved.cadServer || {}) },
     _bottleMorph: saved._bottleMorph || null
@@ -2235,6 +2247,52 @@ async function downloadStl() {
   }
 }
 
+function cadServerBaseUrl() {
+  return state.cadServer?.url?.trim() ? normalizeBaseUrl(state.cadServer.url.trim()) : "";
+}
+
+async function checkCadServer() {
+  syncDraftFromDom();
+  const baseUrl = cadServerBaseUrl();
+  if (!baseUrl) {
+    state.cadServer.status = "Not configured";
+    persist("Add a CAD server URL first");
+    return;
+  }
+
+  loadingAction = "check-cad-server";
+  render();
+
+  try {
+    const response = await fetch(`${baseUrl}/health`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || data.message || `CAD server failed (${response.status})`);
+    state.cadServer.status = data.aiProxy ? "Online + AI proxy" : "Online";
+    state.bridge.lastMessage = `${data.service || "CAD server"} is reachable. AI proxy: ${data.aiProxy ? "configured" : "not configured"}.`;
+    persist("CAD server connected");
+  } catch (error) {
+    state.cadServer.status = `Error: ${error.message}`;
+    persist("CAD server check failed");
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function postCadServer(endpoint, body, label) {
+  const baseUrl = cadServerBaseUrl();
+  if (!baseUrl) throw new Error("Add a CAD server URL");
+  const response = await fetch(`${baseUrl}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || data.message || `${label} failed (${response.status})`);
+  state.cadServer.status = "Online";
+  return data;
+}
+
 async function postBridge(endpoint, actionLabel) {
   syncDraftFromDom();
   if (!state.bridge.url) throw new Error("Add a SolidWorks bridge URL");
@@ -2434,6 +2492,7 @@ async function optimizeModel() {
 }
 
 async function assessMaterial() {
+  syncDraftFromDom();
   loadingAction = "material";
   render();
   try {
@@ -2442,9 +2501,72 @@ async function assessMaterial() {
     state.analysis.material.source = state.analysis.material.source || "Bridge";
     persist("Material/LCA assessment complete");
   } catch (error) {
-    state.analysis.material = { ...buildMaterialAssessment(state.concept.material, state.parameters), source: "Local material model" };
-    state.bridge.lastMessage = "Bridge unavailable; local material/LCA estimate used";
-    persist("Local material/LCA assessment generated");
+    try {
+      const data = await postCadServer("/api/lca", makeCurrentModelPayload(), "LCA assessment");
+      state.analysis.material = data.materialAssessment || data;
+      state.analysis.material.source = state.analysis.material.source || "CAD server";
+      persist("CAD server LCA screen complete");
+    } catch (serverError) {
+      state.analysis.material = { ...buildMaterialAssessment(state.concept.material, state.parameters), source: "Local material model" };
+      state.bridge.lastMessage = `Bridge/CAD server unavailable; local material/LCA estimate used (${serverError.message})`;
+      persist("Local material/LCA assessment generated");
+    }
+  } finally {
+    loadingAction = "";
+    render();
+  }
+}
+
+async function searchPatents() {
+  syncDraftFromDom();
+  const query = ideaSearchQuery();
+  const requestBody = {
+    query,
+    family: state.concept.family,
+    material: state.concept.material,
+    features: state.concept.features,
+    requirements: state.requirements
+  };
+  state.ip = state.ip || {};
+  state.ip.query = query;
+
+  if (!cadServerBaseUrl() && !state.bridge.url) {
+    state.ip.status = "Links only";
+    state.ip.source = "Search launchers";
+    state.ip.results = [];
+    state.ip.lastMessage = "Add a CAD server URL or bridge URL to run backend patent search. External search launchers are still available.";
+    persist("Patent search links ready");
+    return;
+  }
+
+  loadingAction = "search-patents";
+  render();
+
+  try {
+    let data;
+    if (cadServerBaseUrl()) {
+      data = await postCadServer("/api/patents/search", requestBody, "Patent search");
+    } else {
+      const baseUrl = normalizeBaseUrl(state.bridge.url);
+      const response = await fetch(`${baseUrl}/api/patents/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+      });
+      data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) throw new Error(data.error || data.message || `Patent search failed (${response.status})`);
+    }
+    state.ip.status = data.results?.length ? "Results found" : "No backend results";
+    state.ip.source = data.source || "CAD server";
+    state.ip.results = Array.isArray(data.results) ? data.results : [];
+    state.ip.lastMessage = data.message || `${state.ip.results.length} patent records returned`;
+    persist("Patent search complete");
+  } catch (error) {
+    state.ip.status = "Search failed";
+    state.ip.source = "Search launchers";
+    state.ip.results = [];
+    state.ip.lastMessage = error.message || "Patent search failed";
+    persist("Patent search failed");
   } finally {
     loadingAction = "";
     render();
@@ -3374,6 +3496,23 @@ function renderRequirements() {
               <span class="meta-label">Prior-art query</span>
               <p>${escapeHtml(ipQuery)}</p>
             </div>
+            <div class="button-row">
+              <button class="button secondary" data-action="search-patents" ${loadingAction === "search-patents" ? "disabled" : ""}>${loadingAction === "search-patents" ? "Searching..." : "Run backend patent search"}</button>
+              <span class="badge ${state.ip?.status === "Results found" ? "good" : state.ip?.status === "Search failed" ? "bad" : "warn"}">${escapeHtml(state.ip?.status || "Not searched")}</span>
+            </div>
+            ${state.ip?.lastMessage ? `<p class="helper-text">${escapeHtml(state.ip.lastMessage)}</p>` : ""}
+            ${state.ip?.results?.length ? `
+              <div class="patent-results">
+                ${state.ip.results.slice(0, 6).map(result => `
+                  <a class="patent-card" href="${escapeHtml(result.url || patentLinks[0][1])}" target="_blank" rel="noopener">
+                    <span>${escapeHtml(result.source || state.ip.source || "Patent record")}</span>
+                    <strong>${escapeHtml(result.title || "Untitled patent")}</strong>
+                    <p>${escapeHtml([result.publication || result.patentNumber, result.date, result.assignee].filter(Boolean).join(" | ") || "Patent metadata pending")}</p>
+                    ${result.abstract ? `<em>${escapeHtml(result.abstract.slice(0, 220))}${result.abstract.length > 220 ? "..." : ""}</em>` : ""}
+                  </a>
+                `).join("")}
+              </div>
+            ` : ""}
             <div class="link-grid">
               ${patentLinks.map(([label, url, note]) => `
                 <a class="tool-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">
@@ -3461,6 +3600,7 @@ function renderModel() {
           </div>
           <div class="button-row">
             <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>${loadingAction === "connect-bridge" ? "Connecting..." : bridgeOk ? "Bridge connected" : "Connect bridge"}</button>
+            <button class="button secondary" data-action="check-cad-server" ${loadingAction === "check-cad-server" ? "disabled" : ""}>${loadingAction === "check-cad-server" ? "Checking..." : "Check CAD server"}</button>
             <button class="button ghost" data-action="export-snapshot">Export payload</button>
           </div>
           ${state.bridge.lastMessage ? `<p class="bridge-msg">${escapeHtml(state.bridge.lastMessage)}</p>` : ""}
@@ -4004,6 +4144,7 @@ document.addEventListener("click", event => {
   if (action === "generate-model") generateModel();
   if (action === "apply-parameters") applyParameterChanges();
   if (action === "connect-bridge") connectBridge();
+  if (action === "check-cad-server") checkCadServer();
   if (action === "send-model") sendToSolidWorks();
   if (action === "download-stl") downloadStl();
   if (action === "open-bridge-viewer") openBridgeViewer();
@@ -4027,6 +4168,7 @@ document.addEventListener("click", event => {
   }
   if (action === "reset-demo") resetDemo();
   if (action === "lookup-standards") lookupStandards();
+  if (action === "search-patents") searchPatents();
   if (action === "download-sw-vars") downloadSolidWorksMacro();
   if (action === "simulate") runSimulation();
   if (action === "optimize") optimizeModel();

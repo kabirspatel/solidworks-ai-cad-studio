@@ -415,6 +415,7 @@ textarea {
 .portal-card,
 .library-card,
 .tool-link,
+.patent-card,
 .lca-score {
   display: grid;
   gap: 5px;
@@ -434,6 +435,7 @@ textarea {
 .route-card span,
 .portal-card span,
 .library-card span,
+.patent-card span,
 .lca-score span {
   color: var(--quiet);
   font-size: 10px;
@@ -444,6 +446,7 @@ textarea {
 
 .route-card strong,
 .library-card strong,
+.patent-card strong,
 .tool-link strong,
 .lca-score strong {
   color: var(--ink);
@@ -453,6 +456,7 @@ textarea {
 .route-card p,
 .portal-card p,
 .library-card p,
+.patent-card p,
 .tool-link span,
 .lca-score p,
 .ip-panel p {
@@ -467,6 +471,18 @@ textarea {
   font-size: 10px;
   font-style: normal;
   line-height: 1.35;
+}
+
+.patent-results {
+  display: grid;
+  gap: 8px;
+}
+
+.patent-card em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.4;
 }
 
 .tool-link:hover {

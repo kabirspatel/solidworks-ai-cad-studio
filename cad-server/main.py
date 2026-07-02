@@ -12,6 +12,7 @@ import json
 import os
 import struct
 import urllib.error
+import urllib.parse
 import urllib.request
 
 app = FastAPI(title="SolidWorks AI CAD Server")
@@ -22,6 +23,18 @@ app.add_middleware(
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
 )
+
+MATERIAL_LIBRARY = {
+    "PC-ABS": {"process": "Injection molding", "feasibility": 88, "lca": 62, "notes": "Strong enclosure baseline; petrochemical resin and end-of-life recovery need review."},
+    "Medical-grade PC-ABS": {"process": "Injection molding", "feasibility": 84, "lca": 58, "notes": "Good cleanability and impact behavior; verify medical compliance and resin availability."},
+    "ABS": {"process": "Injection molding", "feasibility": 82, "lca": 55, "notes": "Easy to tool and prototype; weaker sustainability profile."},
+    "PET": {"process": "Blow molding", "feasibility": 86, "lca": 70, "notes": "Strong bottle baseline; high recycling familiarity."},
+    "PETG": {"process": "Thermoforming or additive prototyping", "feasibility": 76, "lca": 61, "notes": "Useful for prototypes; production route needs closer review."},
+    "PP": {"process": "Injection molding or thermoforming", "feasibility": 81, "lca": 68, "notes": "Low density and good processability; stiffness tradeoffs need FEA."},
+    "Aluminum 6061-T6": {"process": "CNC machining or forming", "feasibility": 79, "lca": 64, "notes": "High stiffness and recyclability; embodied energy is high."},
+    "Stainless steel": {"process": "Sheet forming or machining", "feasibility": 74, "lca": 60, "notes": "Durable and cleanable; mass and process energy are concerns."},
+    "Mixed materials": {"process": "Assembly", "feasibility": 66, "lca": 48, "notes": "Separability and end-of-life strategy need definition."},
+}
 
 
 # ── geometry primitives ───────────────────────────────────────────────────────
@@ -296,6 +309,109 @@ def call_openai_copilot(body, api_key):
     return parse_json_text(text)
 
 
+# ── analysis / IP helpers ────────────────────────────────────────────────────
+
+def clamp(value, lower, upper):
+    return min(upper, max(lower, value))
+
+
+def material_record(material):
+    if material in MATERIAL_LIBRARY:
+        return MATERIAL_LIBRARY[material]
+    for key, record in MATERIAL_LIBRARY.items():
+        if material and key.lower() in str(material).lower():
+            return record
+    return MATERIAL_LIBRARY["Mixed materials"]
+
+
+def material_assessment(payload):
+    concept = payload.get("concept") or {}
+    params = payload.get("parameters") or []
+    material = concept.get("material") or payload.get("material") or "Mixed materials"
+    record = material_record(material)
+    wall = 2.5
+    for param in params:
+        key = str(param.get("key", ""))
+        if "wall" in key.lower() or "thickness" in key.lower():
+            try:
+                wall = float(param.get("value"))
+            except (TypeError, ValueError):
+                pass
+            break
+    count_penalty = 0
+    for param in params:
+        if param.get("unit") == "count":
+            try:
+                count_penalty += max(0, float(param.get("value", 0)) - 4)
+            except (TypeError, ValueError):
+                pass
+    feasibility = int(clamp(round(record["feasibility"] + wall * 1.2 - count_penalty * 1.5), 35, 98))
+    lca = int(clamp(round(record["lca"] - max(0, wall - 2.5) * 3 - count_penalty), 20, 96))
+    return {
+        "material": material,
+        "process": record["process"],
+        "feasibility": feasibility,
+        "lca": lca,
+        "decomposition": "Favorable" if lca >= 70 else "Review" if lca >= 55 else "Constrained",
+        "recommendation": "Proceed to bridge validation" if feasibility >= 82 and lca >= 65 else "Review material/process tradeoffs before release",
+        "notes": record["notes"],
+        "source": "CAD server LCA screen",
+    }
+
+
+def patent_links(query):
+    encoded = urllib.parse.quote(query)
+    return [
+        {"label": "Google Patents", "url": f"https://patents.google.com/?q={encoded}", "note": "Fast broad prior-art scan"},
+        {"label": "USPTO Patent Public Search", "url": "https://ppubs.uspto.gov/pubwebapp/", "note": "Official US patent search"},
+        {"label": "Espacenet", "url": f"https://worldwide.espacenet.com/patent/search?q={encoded}", "note": "International patent literature"},
+        {"label": "The Lens", "url": f"https://www.lens.org/lens/search/patent/list?q={encoded}", "note": "Patent and scholarly landscape"},
+    ]
+
+
+def normalize_patentsview_result(item):
+    number = item.get("patent_number") or item.get("patent_id") or item.get("publication_number") or ""
+    title = item.get("patent_title") or item.get("title") or "Untitled patent"
+    return {
+        "source": "PatentsView",
+        "patentNumber": number,
+        "publication": number,
+        "title": title,
+        "date": item.get("patent_date") or item.get("publication_date") or "",
+        "assignee": ", ".join(a.get("assignee_organization", "") for a in item.get("assignees", []) if a.get("assignee_organization")) if isinstance(item.get("assignees"), list) else "",
+        "abstract": item.get("patent_abstract") or item.get("abstract") or "",
+        "url": f"https://patents.google.com/patent/US{number}" if number else "https://patents.google.com/",
+    }
+
+
+def search_patentsview(query, limit=8):
+    q = {
+        "_or": [
+            {"_text_any": {"patent_title": query}},
+            {"_text_any": {"patent_abstract": query}},
+        ]
+    }
+    fields = [
+        "patent_number",
+        "patent_title",
+        "patent_date",
+        "patent_abstract",
+        "assignees.assignee_organization",
+    ]
+    options = {"per_page": limit}
+    params = urllib.parse.urlencode({
+        "q": json.dumps(q),
+        "f": json.dumps(fields),
+        "o": json.dumps(options),
+    })
+    url = f"https://api.patentsview.org/patents/query?{params}"
+    request = urllib.request.Request(url, headers={"User-Agent": "solidworks-ai-cad-studio/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    patents = data.get("patents") or []
+    return [normalize_patentsview_result(item) for item in patents[:limit]]
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -304,6 +420,7 @@ def health():
         "status": "ok",
         "service": "CAD geometry server",
         "aiProxy": bool(os.environ.get("OPENAI_API_KEY")),
+        "capabilities": ["geometry", "stl", "ai-proxy", "lca-screen", "patent-search"],
     }
 
 
@@ -318,6 +435,44 @@ async def copilot(body: dict):
         }
 
     return await asyncio.to_thread(call_openai_copilot, body, api_key)
+
+
+@app.post("/api/lca")
+async def lca(body: dict):
+    assessment = material_assessment(body)
+    return {
+        "message": "CAD server material/LCA screen complete. Use SOLIDWORKS Sustainability tooling for a formal report.",
+        "materialAssessment": assessment,
+    }
+
+
+@app.post("/api/patents/search")
+async def patents_search(body: dict):
+    query = " ".join(str(part) for part in [
+        body.get("query", ""),
+        body.get("family", ""),
+        body.get("material", ""),
+        " ".join(body.get("features") or []),
+    ] if part).strip() or "parametric CAD product design"
+    links = patent_links(query)
+
+    try:
+        results = await asyncio.to_thread(search_patentsview, query, int(body.get("limit", 8)))
+        return {
+            "query": query,
+            "source": "PatentsView",
+            "results": results,
+            "links": links,
+            "message": f"{len(results)} patent records returned from PatentsView.",
+        }
+    except Exception as exc:
+        return {
+            "query": query,
+            "source": "Search launchers",
+            "results": [],
+            "links": links,
+            "message": f"Backend patent search unavailable: {exc}. Use the launcher links for manual search.",
+        }
 
 
 @app.post("/api/generate")

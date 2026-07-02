@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=16 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=17 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=16) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=17) to force GitHub Pages cache bust.
 
 ---
 
@@ -198,6 +198,12 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Requirements library and patent/IP panel added**: Legal panel now shows current-family standards library entries and prior-art search links generated from the current idea.
 - **LCA handoff added**: FEA panel now includes material/LCA screening plus links to SOLIDWORKS Simulation, SOLIDWORKS Help, and SOLIDWORKS AI overview.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=16`.
+- **Backend patent/IP route added**: `cad-server/main.py` exposes `/api/patents/search`, attempts PatentsView search, and falls back to search launchers when external search fails.
+- **Backend LCA route added**: `cad-server/main.py` exposes `/api/lca` for material/process/LCA screening from the current payload.
+- **Bridge endpoint aliases added**: `bridge/MacDevBridge/server.mjs` now exposes `/api/lca` and `/api/patents/search` for local dashboard testing.
+- **Dashboard calls backend IP/LCA routes**: Patents/IP panel can run backend search; material/LCA screen tries bridge, then CAD server, then local fallback.
+- **CAD server health check added**: CAD panel can check configured server health and capability state from `/health`.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=17`.
 
 ---
 

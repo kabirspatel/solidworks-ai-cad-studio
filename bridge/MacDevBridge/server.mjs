@@ -123,6 +123,22 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (method === "POST" && url.pathname === "/api/lca") {
+      const payload = await readJson(request);
+      const materialAssessment = buildMaterialAssessment(payload);
+      const run = await persistRun(payload, "lca", { "material-lca-report.json": materialAssessment });
+      lastRun = { ...lastRun, payload, materialAssessment, folder: run.folder, message: "Mac LCA screen completed" };
+      json(response, { message: lastRun.message, materialAssessment, artifacts: run.publicArtifacts });
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/api/patents/search") {
+      const payload = await readJson(request);
+      const result = buildPatentSearch(payload);
+      json(response, result);
+      return;
+    }
+
     if (method === "POST" && url.pathname === "/api/agents/run") {
       const payload = await readJson(request);
       const agents = buildAgents(payload, lastRun);
@@ -400,6 +416,29 @@ function buildMaterialAssessment(payload) {
       : "Review material, resin content, wall thickness, and end-of-life strategy.",
     source: "MacDevBridge material model",
     generatedAt: new Date().toISOString()
+  };
+}
+
+function buildPatentSearch(payload) {
+  const query = [
+    payload.query,
+    payload.family,
+    payload.material,
+    ...(Array.isArray(payload.features) ? payload.features : []),
+    ...(Array.isArray(payload.requirements) ? payload.requirements.slice(0, 2) : [])
+  ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || "parametric CAD product design";
+  const encoded = encodeURIComponent(query);
+  return {
+    query,
+    source: "MacDevBridge search launchers",
+    results: [],
+    links: [
+      { label: "Google Patents", url: `https://patents.google.com/?q=${encoded}`, note: "Fast broad prior-art scan" },
+      { label: "USPTO Patent Public Search", url: "https://ppubs.uspto.gov/pubwebapp/", note: "Official US patent search" },
+      { label: "Espacenet", url: `https://worldwide.espacenet.com/patent/search?q=${encoded}`, note: "International patent literature" },
+      { label: "The Lens", url: `https://www.lens.org/lens/search/patent/list?q=${encoded}`, note: "Patent and scholarly landscape" }
+    ],
+    message: "Local bridge returned patent search launchers. Deploy cad-server for PatentsView-backed search."
   };
 }
 
