@@ -3,7 +3,7 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=17 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=18 (use `git log -1 --oneline` for the current hash)
 
 ---
 
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=17) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=18) to force GitHub Pages cache bust.
 
 ---
 
@@ -72,7 +72,7 @@ After any JS/CSS change: bump `?v=N` in `index.html` (currently v=17) to force G
 ### AI Copilot — all three modes correct
 | Provider | Endpoint | Key storage | Notes |
 |----------|----------|-------------|-------|
-| **Gemini** | `generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent` | `sessionStorage` SESSION_GEMINI_KEY | Free tier quota exhausted for Kabir's key |
+| **Gemini** | `generativelanguage.googleapis.com/v1beta/interactions`, default model `gemini-3.5-flash`, fallback to `generateContent` | `sessionStorage` SESSION_GEMINI_KEY | Browser key route now has real diagnostic via Check AI route |
 | **Claude** | `api.anthropic.com/v1/messages`, model `claude-sonnet-4-6`, header `anthropic-dangerous-direct-browser-access: true` | `sessionStorage` SESSION_CLAUDE_KEY | Working |
 | **OpenAI** | `api.openai.com/v1/chat/completions`, default model `gpt-4o-mini` | `sessionStorage` SESSION_AI_KEY | Working (was broken, fixed this session) |
 | **Local parser** | No network call | — | Always available, returns deterministic output |
@@ -92,7 +92,7 @@ AI flow: prompt → `askCopilot()` → `callGemini/Claude/OpenAI()` → `parseJs
 - Bracket: `ExtrudeGeometry` L-shape
 - Tray/Enclosure/Assembly: `BoxGeometry`
 - If `state.cadServer.url` is set: fetches real STL from `/api/generate`, falls back to parametric on error
-- Viewer does NOT show ribs, facets, or helix features (only lathe profile)
+- Viewer applies bottle oval squeeze plus rib, ring, facet, and helix relief directly from slider parameters
 
 ### SolidWorks macro (VBA .swb)
 - "Push to SolidWorks" in model panel → downloads `.swb` file
@@ -204,6 +204,9 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Dashboard calls backend IP/LCA routes**: Patents/IP panel can run backend search; material/LCA screen tries bridge, then CAD server, then local fallback.
 - **CAD server health check added**: CAD panel can check configured server health and capability state from `/health`.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=17`.
+- **Gemini route modernized**: Browser Gemini now defaults to `gemini-3.5-flash`, uses the Interactions API with structured JSON output, falls back to `generateContent`, and the Check AI route button makes a real diagnostic call.
+- **Prompt hard constraints added**: Bottle prompts such as "wide", "smooth", "no spiral", and "without helix" now override stale seed/AI parameters by setting helix/rib/ring/facet dimensions appropriately.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=18`.
 
 ---
 
@@ -211,10 +214,10 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 
 ### HIGH PRIORITY
 
-**1. AI key situation — Gemini free quota is hit**  
-Kabir's Gemini free-tier key is exhausted. Options:
+**1. Production AI route**
+Browser keys work for prototyping, but each user currently needs their own Gemini/Claude/OpenAI key and browser calls expose provider keys to that tab. Options:
 - Add a server-side AI proxy endpoint (backend holds the key, browser calls `/api/copilot`) — no per-user key needed
-- Or tell Kabir to add an OpenAI or Claude key via the AI Provider dropdown
+- Keep browser-key mode for personal prototyping only
 - The `callAiEndpoint()` function already supports a custom bridge endpoint — just needs a deployed backend
 
 **2. Deploy cad-server to Render.com**

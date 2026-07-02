@@ -3,6 +3,8 @@ const SESSION_AI_KEY = "solidworks-ai-openai-key";
 const SESSION_CLAUDE_KEY = "solidworks-ai-claude-key";
 const SESSION_GEMINI_KEY = "solidworks-ai-gemini-key";
 const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const LEGACY_GEMINI_MODEL = "gemini-2.0-flash";
 const DEFAULT_BRIDGE_URL = "";
 const DEFAULT_AI_ENDPOINT = "";
 const DEFAULT_CLOUD_SPACE_URL = "";
@@ -490,6 +492,80 @@ const CAD_LIBRARY = {
   }
 };
 
+const CAD_AI_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: { type: "string", description: "Short operator-facing summary" },
+    title: { type: "string", description: "Model title" },
+    family: { type: "string", enum: ["enclosure", "bottle", "bracket", "tray", "assembly"] },
+    material: { type: "string" },
+    requirements: { type: "array", items: { type: "string" } },
+    parameters: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          key: { type: "string" },
+          label: { type: "string" },
+          unit: { type: "string" },
+          value: { type: "number" },
+          source: { type: "string" },
+          swDimension: { type: "string" }
+        },
+        required: ["key", "label", "unit", "value"]
+      }
+    },
+    features: { type: "array", items: { type: "string" } },
+    solidworksIntent: {
+      type: "object",
+      properties: {
+        documentType: { type: "string" },
+        rebuildMode: { type: "string" },
+        operations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              order: { type: "integer" },
+              name: { type: "string" },
+              action: { type: "string" }
+            }
+          }
+        }
+      }
+    },
+    analysis: {
+      type: "object",
+      properties: {
+        summary: { type: "string" }
+      }
+    },
+    agents: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          key: { type: "string" },
+          label: { type: "string" },
+          status: { type: "string" },
+          result: { type: "string" }
+        }
+      }
+    }
+  },
+  required: ["title", "family", "parameters"]
+};
+
+const GEMINI_DIAGNOSTIC_SCHEMA = {
+  type: "object",
+  properties: {
+    ok: { type: "boolean" },
+    provider: { type: "string" },
+    model: { type: "string" }
+  },
+  required: ["ok", "provider", "model"]
+};
+
 let state = loadState();
 let loadingAction = "";
 
@@ -596,6 +672,7 @@ function normalizeState(saved) {
   const savedBridge = { ...(saved.bridge || {}) };
   const savedCloud = { ...(saved.cloud || {}) };
   if (!savedAi.endpoint) savedAi.endpoint = defaults.ai.endpoint;
+  if (savedAi.mode === "gemini" && (!savedAi.model || savedAi.model === LEGACY_GEMINI_MODEL)) savedAi.model = DEFAULT_GEMINI_MODEL;
   if (savedBridge.url === "https://localhost:8787") savedBridge.url = "http://127.0.0.1:8787";
   if (!savedCloud.spaceUrl) savedCloud.spaceUrl = defaults.cloud.spaceUrl;
   if (!savedCloud.launchUrl) savedCloud.launchUrl = savedCloud.spaceUrl;
@@ -1274,11 +1351,99 @@ function buildFeatures(baseFeatures, text) {
   return [...new Set([...baseFeatures, ...extras])].slice(0, 8);
 }
 
+function promptIntentFlags(text = "") {
+  return {
+    wide: /\b(wide|broad|squat|large[-\s]?diameter|wide[-\s]?body)\b/i.test(text),
+    noSpiral: /(\b(no|without|remove|avoid)\b[^.\n]{0,44}\b(spirals?|helix|helixes|helices|helical|twists?)\b)|(\b(spirals?|helix|helixes|helices|helical|twists?)\b[^.\n]{0,44}\b(off|none|remove|avoid)\b)/i.test(text),
+    smooth: /\b(smooth|plain[-\s]?sided|unribbed|no texture|without texture|no ribs|without ribs)\b/i.test(text)
+  };
+}
+
+function bottleParameterDefinition(key, fallback = {}) {
+  const slider = BOTTLE_SLIDER_CONFIG.find(item => item.key === key);
+  const library = CAD_LIBRARY.bottle.parameters.find(item => item.key === key);
+  const base = slider || library || fallback;
+  const unit = base.integer && !base.unit ? "count" : base.unit !== undefined ? base.unit : fallback.unit || "mm";
+  return {
+    key,
+    label: base.label || fallback.label || key,
+    unit,
+    swDimension: base.swKey || base.swDimension || fallback.swDimension || ""
+  };
+}
+
+function upsertPromptParameter(parameters, key, value, source = "Requirement") {
+  const definition = bottleParameterDefinition(key);
+  const index = parameters.findIndex(parameter => parameter.key === key);
+  const next = {
+    key,
+    label: definition.label,
+    unit: definition.unit,
+    value,
+    source,
+    swDimension: definition.swDimension || toSolidWorksDimensionName(definition, Math.max(index, parameters.length)),
+    aliases: []
+  };
+  if (index >= 0) {
+    parameters[index] = { ...parameters[index], ...next };
+  } else {
+    parameters.push(next);
+  }
+}
+
+function parameterValueFromList(parameters, key, fallback) {
+  const match = parameters.find(parameter => parameter.key === key);
+  const value = Number(match?.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function applyPromptIntentOverrides(parameters, features, text, family) {
+  const flags = promptIntentFlags(text);
+  if (family !== "bottle") return { parameters, features, customBottle: false };
+
+  const nextParameters = parameters.map(parameter => ({ ...parameter }));
+  let nextFeatures = [...new Set(features || [])];
+  let customBottle = false;
+
+  if (flags.wide) {
+    const diameter = Math.max(parameterValueFromList(nextParameters, "bodyDiameter", 68), 76);
+    const depth = Math.max(parameterValueFromList(nextParameters, "bodyDepth", diameter), 70);
+    upsertPromptParameter(nextParameters, "bodyDiameter", round(diameter, 1));
+    upsertPromptParameter(nextParameters, "bodyDepth", round(depth, 1));
+    if (!nextFeatures.some(feature => /wide body/i.test(feature))) nextFeatures.push("Wide body");
+    customBottle = true;
+  }
+
+  if (flags.noSpiral) {
+    upsertPromptParameter(nextParameters, "helixRidges", 0);
+    upsertPromptParameter(nextParameters, "helixDepth", 0);
+    upsertPromptParameter(nextParameters, "helixTurns", 0);
+    nextFeatures = nextFeatures.filter(feature => !/(spiral|helix|helical|twist)/i.test(feature));
+    if (!nextFeatures.some(feature => /smooth body/i.test(feature))) nextFeatures.push("Smooth body");
+    customBottle = true;
+  }
+
+  if (flags.smooth) {
+    for (const [key, value] of [["ribCount", 0], ["ribDepth", 0], ["ringCount", 0], ["ringDepth", 0], ["facetCount", 0], ["facetDepth", 0]]) {
+      upsertPromptParameter(nextParameters, key, value);
+    }
+    nextFeatures = nextFeatures.filter(feature => !/(rib|ring|facet|texture|panel)/i.test(feature));
+    if (!nextFeatures.some(feature => /smooth body/i.test(feature))) nextFeatures.push("Smooth body");
+    customBottle = true;
+  }
+
+  return {
+    parameters: nextParameters,
+    features: nextFeatures.slice(0, 8),
+    customBottle
+  };
+}
+
 function buildModelBlueprint(prompt, requirementText, selectedTemplate) {
   const combined = `${prompt}\n${requirementText}`.trim();
   const family = inferFamily(combined, selectedTemplate);
   const library = CAD_LIBRARY[family] || CAD_LIBRARY.assembly;
-  const parameters = library.parameters.map((definition, index) => {
+  let parameters = library.parameters.map((definition, index) => {
     const result = definition.type === "count"
       ? extractCount(combined, definition.aliases, definition.fallback)
       : extractNumber(combined, definition.aliases, definition.fallback, definition.unit);
@@ -1286,7 +1451,9 @@ function buildModelBlueprint(prompt, requirementText, selectedTemplate) {
   });
   const material = extractMaterial(combined, library.defaultMaterial);
   const title = extractTitle(prompt, requirementText, library.defaultTitle);
-  const features = buildFeatures(library.features, combined);
+  const overrides = applyPromptIntentOverrides(parameters, buildFeatures(library.features, combined), combined, family);
+  parameters = overrides.parameters;
+  const features = overrides.features;
 
   return {
     targetDoc: `${sanitizeFilename(title)}.SLDPRT`,
@@ -1395,7 +1562,7 @@ function bridgeAiEndpoint() {
 function aiRouteStatus() {
   if (state.ai.mode === "parser") return ["Local parser", "Works offline, but not generative AI."];
   if (state.ai.mode === "bridge") return ["Server proxy", state.ai.endpoint ? state.ai.endpoint : "Endpoint URL required."];
-  if (state.ai.mode === "gemini") return ["Browser Gemini key", sessionStorage.getItem(SESSION_GEMINI_KEY) ? "Key loaded for this tab." : "Paste a Gemini API key."];
+  if (state.ai.mode === "gemini") return ["Browser Gemini key", sessionStorage.getItem(SESSION_GEMINI_KEY) ? `Key loaded for this tab. Run Check AI route to verify ${resolveGeminiModel()}.` : "Paste a Gemini API key."];
   if (state.ai.mode === "claude") return ["Browser Claude key", sessionStorage.getItem(SESSION_CLAUDE_KEY) ? "Key loaded for this tab." : "Paste an Anthropic key."];
   if (state.ai.mode === "openai") return ["Browser OpenAI key", sessionStorage.getItem(SESSION_AI_KEY) ? "Key loaded for this tab." : "Paste an OpenAI key."];
   return ["Unknown", "Select an AI route."];
@@ -1427,7 +1594,7 @@ function syncDraftFromDom() {
   if (aiMode) {
     const newMode = aiMode.value;
     if (newMode !== state.ai.mode) {
-      const modeDefaults = { gemini: "gemini-2.0-flash", claude: "claude-sonnet-4-6", openai: "gpt-4o-mini", bridge: "", parser: "" };
+      const modeDefaults = { gemini: DEFAULT_GEMINI_MODEL, claude: "claude-sonnet-4-6", openai: "gpt-4o-mini", bridge: "", parser: "" };
       state.ai.model = modeDefaults[newMode] || "";
       if (aiModel) aiModel.value = state.ai.model;
     }
@@ -1714,7 +1881,7 @@ function applyAiPayload(payload, fallbackReply) {
   const library = CAD_LIBRARY[family];
   const localBlueprint = buildModelBlueprint(state.prompt, state.requirementText, family);
 
-  const parameters = Array.isArray(payload.parameters) && payload.parameters.length
+  let parameters = Array.isArray(payload.parameters) && payload.parameters.length
     ? payload.parameters.map((item, index) => {
       const base = localBlueprint.parameters[index] || library.parameters[index] || {};
       return {
@@ -1733,13 +1900,20 @@ function applyAiPayload(payload, fallbackReply) {
     }));
 
   const title = payload.title || localBlueprint.concept.title;
+  const promptOverrides = applyPromptIntentOverrides(
+    parameters,
+    Array.isArray(payload.features) && payload.features.length ? payload.features.slice(0, 8) : localBlueprint.concept.features,
+    `${state.prompt}\n${state.requirementText}`,
+    family
+  );
+  parameters = promptOverrides.parameters;
   state.revision += 1;
   state.concept = {
     title,
     family,
     familyLabel: library.label,
     material: payload.material || localBlueprint.concept.material,
-    features: Array.isArray(payload.features) && payload.features.length ? payload.features.slice(0, 8) : localBlueprint.concept.features
+    features: promptOverrides.features
   };
   state.requirements = Array.isArray(payload.requirements) && payload.requirements.length ? payload.requirements.slice(0, 10) : localBlueprint.requirements;
   state.parameters = parameters;
@@ -1757,6 +1931,7 @@ function applyAiPayload(payload, fallbackReply) {
     };
   }
   if (Array.isArray(payload.agents) && payload.agents.length) state.agents = payload.agents;
+  if (family === "bottle" && promptOverrides.customBottle) state._bottleMorph = null;
   state.designTable.rows = buildDesignTableRows();
 }
 
@@ -1891,31 +2066,117 @@ async function callAiEndpoint() {
   return typeof data === "string" ? parseJsonFromText(data) : data;
 }
 
-async function callGemini() {
-  const key = sessionStorage.getItem(SESSION_GEMINI_KEY);
-  if (!key) throw new Error("Add a Gemini API key. Get one free at aistudio.google.com.");
-  const model = (state.ai.model || "").startsWith("gemini") ? state.ai.model : "gemini-2.0-flash";
+function resolveGeminiModel() {
+  return (state.ai.model || "").startsWith("gemini") ? state.ai.model : DEFAULT_GEMINI_MODEL;
+}
 
+function extractGeminiInteractionText(data = {}) {
+  if (typeof data.output_text === "string") return data.output_text;
+  const textParts = [];
+  for (const step of data.steps || []) {
+    for (const output of step.output || []) {
+      if (typeof output.text === "string") textParts.push(output.text);
+      for (const content of output.content || []) {
+        if (typeof content.text === "string") textParts.push(content.text);
+      }
+    }
+  }
+  return textParts.join("\n").trim();
+}
+
+function geminiRequestError(data, status, route) {
+  const detail = data.error?.message || `Gemini ${route} request failed (${status})`;
+  const error = new Error(detail);
+  error.status = status;
+  error.route = route;
+  error.provider = "gemini";
+  return error;
+}
+
+function shouldFallbackGemini(error) {
+  if ([401, 403, 429].includes(Number(error.status))) return false;
+  if ([400, 404, 501].includes(Number(error.status))) return true;
+  return /failed to fetch|interactions|not found|unsupported|unknown name|unrecognized|invalid json payload/i.test(error.message || "");
+}
+
+async function callGeminiInteractions(key, model, options = {}) {
+  const diagnostic = options.diagnostic === true;
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key
+    },
+    body: JSON.stringify({
+      model,
+      system_instruction: diagnostic ? "Return only valid JSON." : makeAiInstruction(),
+      input: diagnostic
+        ? `Return {"ok":true,"provider":"gemini","model":"${model}"} as JSON only.`
+        : `Generate or update the SolidWorks CAD model from this dashboard state:\n${JSON.stringify(makeCurrentModelPayload(), null, 2)}`,
+      generation_config: { temperature: 0.2, thinking_level: "low", max_output_tokens: diagnostic ? 96 : 1600 },
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: diagnostic ? GEMINI_DIAGNOSTIC_SCHEMA : CAD_AI_RESPONSE_SCHEMA
+      }
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw geminiRequestError(data, response.status, "Interactions API");
+  const text = extractGeminiInteractionText(data);
+  if (!text) throw new Error("Gemini returned an empty response.");
+  const parsed = parseJsonFromText(text);
+  if (diagnostic) return { ...parsed, route: "Interactions API", model };
+  return parsed;
+}
+
+async function callGeminiGenerateContent(key, model, options = {}) {
+  const diagnostic = options.diagnostic === true;
+  const legacyModel = model === DEFAULT_GEMINI_MODEL ? LEGACY_GEMINI_MODEL : model;
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${legacyModel}:generateContent?key=${encodeURIComponent(key)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: makeAiInstruction() }] },
-        contents: [{ role: "user", parts: [{ text: JSON.stringify(makeCurrentModelPayload(), null, 2) }] }],
-        generationConfig: { maxOutputTokens: 1600 }
+        system_instruction: { parts: [{ text: diagnostic ? "Return only valid JSON." : makeAiInstruction() }] },
+        contents: [{
+          role: "user",
+          parts: [{
+            text: diagnostic
+              ? `Return {"ok":true,"provider":"gemini","model":"${legacyModel}"} as JSON only.`
+              : JSON.stringify(makeCurrentModelPayload(), null, 2)
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: diagnostic ? 96 : 1600,
+          responseMimeType: "application/json"
+        }
       })
     }
   );
 
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = data.error?.message || `Gemini request failed (${response.status})`;
-    throw new Error(detail);
+  if (!response.ok) throw geminiRequestError(data, response.status, "generateContent API");
+  const text = data.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n").trim() || "";
+  if (!text) throw new Error("Gemini returned an empty response.");
+  const parsed = parseJsonFromText(text);
+  if (diagnostic) return { ...parsed, route: "generateContent API", model: legacyModel };
+  return parsed;
+}
+
+async function callGemini(options = {}) {
+  const key = sessionStorage.getItem(SESSION_GEMINI_KEY);
+  if (!key) throw new Error("Add a Gemini API key. Get one free at aistudio.google.com.");
+  const model = resolveGeminiModel();
+  try {
+    return await callGeminiInteractions(key, model, options);
+  } catch (error) {
+    if (!shouldFallbackGemini(error)) throw error;
+    return await callGeminiGenerateContent(key, model, options);
   }
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return parseJsonFromText(text);
 }
 
 async function askCopilot() {
@@ -1936,7 +2197,7 @@ async function askCopilot() {
     } else {
       const blueprint = buildModelBlueprint(state.prompt, state.requirementText, state.selectedTemplate);
       payload = {
-        reply: "Local parser generated a deterministic model. Select Claude or OpenAI in the AI source dropdown for generative reasoning.",
+        reply: "Local parser generated a deterministic model. Select Gemini, Claude, OpenAI, or a custom endpoint for generative reasoning.",
         title: blueprint.concept.title,
         family: blueprint.concept.family,
         material: blueprint.concept.material,
@@ -1954,9 +2215,12 @@ async function askCopilot() {
     const firstLine = raw.split(/[\n*]/).map(s => s.trim()).find(Boolean) || raw;
     const brief = firstLine.length > 200 ? firstLine.slice(0, 200) + "…" : firstLine;
     const isQuota = /quota|rate.limit|billing/i.test(raw);
+    const isGemini = state.ai.mode === "gemini";
     const hint = isQuota
-      ? " (Quota exceeded — switch to OpenAI or Claude in the AI Provider dropdown.)"
-      : "";
+      ? " (Quota exceeded - try a different Gemini key, switch providers, or use a server proxy.)"
+      : isGemini
+        ? " (Check that the key is enabled for the Gemini API, the model is available, and browser API calls are allowed. Custom endpoint is safer for production.)"
+        : "";
     state.ai.status = "AI error";
     state.ai.lastReply = brief + hint;
     persist("AI error");
@@ -1992,6 +2256,10 @@ async function testAiRoute() {
       if (!response.ok) throw new Error(`Proxy health check failed (${response.status})`);
       state.ai.status = "Endpoint ready";
       state.ai.lastReply = `AI proxy route is reachable at ${state.ai.endpoint}. Set OPENAI_API_KEY on the bridge/backend for real generation.`;
+    } else if (state.ai.mode === "gemini") {
+      const result = await callGemini({ diagnostic: true });
+      state.ai.status = "Gemini ready";
+      state.ai.lastReply = `Gemini key works via ${result.route || "Gemini API"} using ${result.model || resolveGeminiModel()}.`;
     } else {
       const [route, detail] = aiRouteStatus();
       state.ai.status = route;
@@ -2660,7 +2928,7 @@ function renderCopilot() {
   const imageIdeas = imageIdeaSummary();
   const uploadedFiles = state.uploadedFiles || [];
   const [routeLabel, routeDetail] = aiRouteStatus();
-  const modelDefault = state.ai.mode === "gemini" ? "gemini-2.0-flash"
+  const modelDefault = state.ai.mode === "gemini" ? DEFAULT_GEMINI_MODEL
     : state.ai.mode === "claude" ? "claude-sonnet-4-6"
     : state.ai.mode === "openai" ? "gpt-4o-mini"
     : DEFAULT_MODEL;
