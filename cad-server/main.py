@@ -14,6 +14,7 @@ import struct
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 app = FastAPI(title="SolidWorks AI CAD Server")
 
@@ -34,6 +35,93 @@ MATERIAL_LIBRARY = {
     "Aluminum 6061-T6": {"process": "CNC machining or forming", "feasibility": 79, "lca": 64, "notes": "High stiffness and recyclability; embodied energy is high."},
     "Stainless steel": {"process": "Sheet forming or machining", "feasibility": 74, "lca": 60, "notes": "Durable and cleanable; mass and process energy are concerns."},
     "Mixed materials": {"process": "Assembly", "feasibility": 66, "lca": 48, "notes": "Separability and end-of-life strategy need definition."},
+}
+
+AI_PROVIDER_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "claude": "ANTHROPIC_API_KEY",
+}
+
+CAD_PROVIDERS = {
+    "solidworks_desktop": {
+        "label": "SOLIDWORKS desktop",
+        "category": "desktop",
+        "status": "requires-host",
+        "viewer": "Bridge iframe or exported macro",
+        "auth": "Windows host with licensed SOLIDWORKS and COM automation",
+        "outputs": ["SWB macro", "design-table CSV", "STEP/STL via host"],
+        "nextSteps": [
+            "Run the Windows SolidWorks bridge on a licensed workstation or VM.",
+            "POST the neutral CAD package to /api/model on that bridge.",
+            "Use the generated macro/design table when direct COM access is unavailable.",
+        ],
+    },
+    "solidworks_cloud": {
+        "label": "3DEXPERIENCE / SOLIDWORKS xDesign",
+        "category": "cloud",
+        "status": "broker-required",
+        "viewer": "Provider workspace or shared model iframe when allowed",
+        "auth": "3DEXPERIENCE OAuth/session broker",
+        "outputs": ["neutral CAD package", "STEP/STL handoff", "xDesign workspace link"],
+        "nextSteps": [
+            "Create a Dassault cloud broker with user login.",
+            "Translate dashboard parameters into xDesign feature edits where APIs allow it.",
+            "Fallback to STEP/STL import when feature-level APIs are unavailable.",
+        ],
+    },
+    "onshape": {
+        "label": "Onshape",
+        "category": "cloud",
+        "status": "api-ready",
+        "viewer": "Onshape document/Part Studio iframe or shared URL",
+        "auth": "Onshape OAuth or API key/secret",
+        "outputs": ["Part Studio feature JSON", "STEP", "STL", "DXF"],
+        "nextSteps": [
+            "Provision Onshape OAuth/API credentials.",
+            "Create or clone a document and Part Studio from the generated package.",
+            "Push feature/parameter updates through the Onshape REST API.",
+        ],
+    },
+    "autodesk_fusion": {
+        "label": "Autodesk Fusion / APS",
+        "category": "cloud",
+        "status": "api-ready",
+        "viewer": "Autodesk Platform Services Viewer",
+        "auth": "Autodesk Platform Services OAuth",
+        "outputs": ["SVF/Viewer URN", "STEP", "STL", "Fusion automation job"],
+        "nextSteps": [
+            "Provision APS app credentials and storage bucket.",
+            "Upload generated STEP/STL or source package to APS Object Storage.",
+            "Translate with Model Derivative and automate edits with Design Automation where supported.",
+        ],
+    },
+    "autocad": {
+        "label": "AutoCAD / DWG",
+        "category": "cloud",
+        "status": "api-ready",
+        "viewer": "Autodesk Platform Services Viewer",
+        "auth": "Autodesk Platform Services OAuth",
+        "outputs": ["DWG/DXF package", "Design Automation work item", "Viewer URN"],
+        "nextSteps": [
+            "Convert 2D/profile requirements into DXF/DWG entities.",
+            "Run AutoCAD Design Automation work items for scripted drawings.",
+            "Publish derivative views through APS Viewer.",
+        ],
+    },
+    "open_geometry": {
+        "label": "Open geometry server",
+        "category": "server",
+        "status": "available",
+        "viewer": "Three.js/STL",
+        "auth": "none",
+        "outputs": ["STL", "neutral parameter JSON", "analysis package"],
+        "nextSteps": [
+            "Use /api/generate for immediate STL generation.",
+            "Add CadQuery/OpenCascade later for STEP/BREP-quality output.",
+            "Use this as the fallback when commercial CAD credentials are absent.",
+        ],
+    },
 }
 
 
@@ -274,24 +362,109 @@ def parse_json_text(text):
         raise ValueError("AI returned text instead of model JSON.")
 
 
+def payload_from_ai_body(body):
+    return body.get("payload") or body.get("modelPayload") or body
+
+
+def ai_provider_status():
+    return {
+        "openai": bool(os.environ.get("OPENAI_API_KEY")),
+        "gemini": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")),
+        "claude": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")),
+    }
+
+
+def choose_ai_provider(body):
+    requested = str(body.get("provider") or os.environ.get("AI_PROVIDER") or "").lower().strip()
+    model = str(body.get("model") or "").lower()
+    if requested in {"openai", "gemini", "claude", "local"}:
+        return requested
+    if model.startswith("gemini"):
+        return "gemini"
+    if model.startswith("claude"):
+        return "claude"
+    if model.startswith("gpt") or model.startswith("o"):
+        return "openai"
+    status = ai_provider_status()
+    for provider in ("openai", "gemini", "claude"):
+        if status.get(provider):
+            return provider
+    return "local"
+
+
+def ai_instructions(body):
+    return body.get("instructions") or (
+        "You are a CAD copilot for a CAD-neutral dashboard. Return only valid JSON with "
+        "reply, title, family, material, requirements, parameters, features, solidworksIntent, "
+        "analysis, and agents."
+    )
+
+
+def local_copilot_response(body, reason="No server-side AI provider key is configured."):
+    payload = payload_from_ai_body(body)
+    concept = payload.get("concept") or {}
+    parameters = payload.get("parameters") or []
+    features = concept.get("features") or ["Base feature", "Parametric dimensions", "CAD adapter export"]
+    requirements = payload.get("extractedRequirements") or payload.get("requirements") or []
+    family = concept.get("family") or payload.get("family") or "assembly"
+    material = concept.get("material") or payload.get("material") or "Mixed materials"
+    analysis_material = material_assessment(payload)
+    return {
+        "reply": f"Server local fallback generated CAD JSON. {reason}",
+        "title": concept.get("title") or payload.get("title") or "CAD-neutral concept",
+        "family": family,
+        "material": material,
+        "requirements": requirements,
+        "parameters": [
+            {
+                **param,
+                "source": param.get("source") or "Server fallback",
+            }
+            for param in parameters
+        ],
+        "features": features,
+        "solidworksIntent": payload.get("solidworksIntent") or {
+            "documentType": "part",
+            "rebuildMode": "parametric",
+            "operations": [
+                {"order": index + 1, "name": feature, "action": "create_or_update"}
+                for index, feature in enumerate(features)
+            ],
+        },
+        "analysis": {
+            "material": analysis_material,
+            "simulation": payload.get("analysis", {}).get("simulation") if isinstance(payload.get("analysis"), dict) else None,
+            "optimization": payload.get("analysis", {}).get("optimization") if isinstance(payload.get("analysis"), dict) else None,
+        },
+        "agents": [
+            {"key": "design", "label": "Design", "status": "Ready", "result": f"{len(parameters)} parameters packaged for CAD adapters."},
+            {"key": "standards", "label": "Standards", "status": "Review", "result": f"{len(requirements)} requirements carried into the package."},
+            {"key": "cad", "label": "CAD broker", "status": "Ready", "result": "Use /api/cad/package to route this model to SolidWorks, Onshape, Autodesk, or open geometry."},
+            {"key": "material", "label": "Material", "status": "Ready" if analysis_material["feasibility"] >= 80 else "Review", "result": f"{material}: feasibility {analysis_material['feasibility']}/100."},
+        ],
+        "provider": "local",
+    }
+
+
 def call_openai_copilot(body, api_key):
-    payload = {
+    model_payload = payload_from_ai_body(body)
+    request_payload = {
         "model": body.get("model") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         "max_tokens": 1600,
         "messages": [
             {
                 "role": "system",
-                "content": body.get("instructions") or "Return only valid JSON for a SolidWorks CAD model.",
+                "content": ai_instructions(body),
             },
             {
                 "role": "user",
-                "content": json.dumps(body.get("payload") or {}, indent=2),
+                "content": json.dumps(model_payload, indent=2),
             },
         ],
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(request_payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -307,6 +480,122 @@ def call_openai_copilot(body, api_key):
 
     text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
     return parse_json_text(text)
+
+
+def gemini_text_from_interaction(data):
+    if isinstance(data.get("output_text"), str):
+        return data["output_text"]
+    parts = []
+    for step in data.get("steps") or []:
+        for output in step.get("output") or []:
+            if isinstance(output.get("text"), str):
+                parts.append(output["text"])
+            for content in output.get("content") or []:
+                if isinstance(content.get("text"), str):
+                    parts.append(content["text"])
+    return "\n".join(parts).strip()
+
+
+def call_gemini_copilot(body, api_key):
+    model = body.get("model") or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+    payload = {
+        "model": model,
+        "system_instruction": ai_instructions(body),
+        "input": json.dumps(payload_from_ai_body(body), indent=2),
+        "generation_config": {"temperature": 0.2, "max_output_tokens": 1600},
+        "response_format": {"type": "text", "mime_type": "application/json"},
+    }
+    request = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/interactions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return parse_json_text(gemini_text_from_interaction(data))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        # Fall back to generateContent for projects/models not yet enabled on Interactions.
+        if exc.code not in {400, 404, 501}:
+            raise RuntimeError(detail or f"Gemini request failed ({exc.code})")
+
+    legacy_model = model if str(model).startswith("gemini") else "gemini-1.5-flash"
+    legacy_payload = {
+        "system_instruction": {"parts": [{"text": ai_instructions(body)}]},
+        "contents": [{"role": "user", "parts": [{"text": json.dumps(payload_from_ai_body(body), indent=2)}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1600, "responseMimeType": "application/json"},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(legacy_model)}:generateContent?key={urllib.parse.quote(api_key)}"
+    legacy_request = urllib.request.Request(
+        url,
+        data=json.dumps(legacy_payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(legacy_request, timeout=45) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(detail or f"Gemini request failed ({exc.code})")
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    text = "\n".join(part.get("text", "") for part in parts)
+    return parse_json_text(text)
+
+
+def call_claude_copilot(body, api_key):
+    payload = {
+        "model": body.get("model") or os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        "max_tokens": 1600,
+        "system": ai_instructions(body),
+        "messages": [{"role": "user", "content": json.dumps(payload_from_ai_body(body), indent=2)}],
+    }
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(detail or f"Claude request failed ({exc.code})")
+    content = data.get("content") or []
+    text = "\n".join(item.get("text", "") for item in content if item.get("type") == "text" or item.get("text"))
+    return parse_json_text(text)
+
+
+def run_ai_proxy(body):
+    provider = choose_ai_provider(body)
+    if provider == "local":
+        return local_copilot_response(body)
+    if provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            result = call_openai_copilot(body, api_key)
+            result["provider"] = "openai"
+            return result
+    if provider == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if api_key:
+            result = call_gemini_copilot(body, api_key)
+            result["provider"] = "gemini"
+            return result
+    if provider == "claude":
+        api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
+        if api_key:
+            result = call_claude_copilot(body, api_key)
+            result["provider"] = "claude"
+            return result
+    return local_copilot_response(body, f"{provider} is selected, but its server-side API key is not configured.")
 
 
 # ── analysis / IP helpers ────────────────────────────────────────────────────
@@ -412,29 +701,184 @@ def search_patentsview(query, limit=8):
     return [normalize_patentsview_result(item) for item in patents[:limit]]
 
 
+# ── CAD broker helpers ────────────────────────────────────────────────────────
+
+def selected_provider(provider_key):
+    return CAD_PROVIDERS.get(provider_key) or CAD_PROVIDERS["open_geometry"]
+
+
+def design_table_rows(payload):
+    rows = []
+    for index, param in enumerate(payload.get("parameters") or []):
+        rows.append({
+            "configuration": "Default",
+            "parameter": param.get("key") or f"p{index + 1}",
+            "label": param.get("label") or param.get("key") or f"Parameter {index + 1}",
+            "value": param.get("value"),
+            "unit": param.get("unit") or "mm",
+            "cadDimension": param.get("swDimension") or f"D{index + 1}@{str(param.get('key') or f'p{index + 1}').upper()}",
+            "source": param.get("source") or "CAD package",
+        })
+    return rows
+
+
+def cad_feature_operations(payload, provider_key):
+    concept = payload.get("concept") or {}
+    features = concept.get("features") or []
+    intent = payload.get("solidworksIntent") if isinstance(payload.get("solidworksIntent"), dict) else {}
+    base_ops = intent.get("operations") or []
+    feature_ops = base_ops or [
+        {"order": index + 1, "name": feature, "action": "create_or_update"}
+        for index, feature in enumerate(features)
+    ]
+    dimension_ops = [
+        {
+            "type": "set_parameter",
+            "parameter": row["parameter"],
+            "dimension": row["cadDimension"],
+            "value": row["value"],
+            "unit": row["unit"],
+            "provider": provider_key,
+        }
+        for row in design_table_rows(payload)
+    ]
+    return {
+        "documentType": intent.get("documentType", "part"),
+        "featureOperations": feature_ops,
+        "dimensionOperations": dimension_ops,
+        "imageGeometryOperations": [
+            {
+                "type": "guide_curve_profile",
+                "name": image.get("name"),
+                "confidence": image.get("confidence"),
+                "points": image.get("profile") or [],
+            }
+            for image in (payload.get("imageGeometry") or {}).get("images", [])
+        ],
+        "transitionMatrix": (payload.get("imageGeometry") or {}).get("transitionMatrix") or [],
+    }
+
+
+def provider_package(payload, provider_key):
+    provider = selected_provider(provider_key)
+    rows = design_table_rows(payload)
+    operations = cad_feature_operations(payload, provider_key)
+    concept = payload.get("concept") or {}
+    family = concept.get("family") or payload.get("family") or "assembly"
+    title = concept.get("title") or payload.get("title") or "CAD concept"
+    return {
+        "version": "cad-neutral-v1",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "providerKey": provider_key,
+        "provider": provider,
+        "target": {
+            "family": family,
+            "title": title,
+            "documentName": payload.get("targetDocument") or f"{title.replace(' ', '-').lower()}.SLDPRT",
+            "material": concept.get("material") or payload.get("material") or "Mixed materials",
+        },
+        "payload": payload,
+        "designTable": rows,
+        "operations": operations,
+        "exportFormats": provider["outputs"],
+        "nextSteps": provider["nextSteps"],
+    }
+
+
+def push_provider_package(payload, provider_key):
+    package = provider_package(payload, provider_key)
+    provider = package["provider"]
+    configured = False
+    if provider_key == "onshape":
+        configured = bool(os.environ.get("ONSHAPE_ACCESS_KEY") and os.environ.get("ONSHAPE_SECRET_KEY"))
+    elif provider_key in {"autodesk_fusion", "autocad"}:
+        configured = bool(os.environ.get("APS_CLIENT_ID") and os.environ.get("APS_CLIENT_SECRET"))
+    elif provider_key == "solidworks_cloud":
+        configured = bool(os.environ.get("DASSAULT_CLIENT_ID") and os.environ.get("DASSAULT_CLIENT_SECRET"))
+    elif provider_key == "solidworks_desktop":
+        configured = bool(os.environ.get("SOLIDWORKS_BRIDGE_URL"))
+    elif provider_key == "open_geometry":
+        configured = True
+
+    if provider_key == "open_geometry":
+        return {
+            "status": "ready",
+            "provider": provider,
+            "message": "Open geometry package is ready. Use /api/generate to download STL from the same payload.",
+            "package": package,
+        }
+
+    if not configured:
+        return {
+            "status": "needs-credentials",
+            "provider": provider,
+            "message": f"{provider['label']} package created, but credentials/host are not configured on this server.",
+            "package": package,
+        }
+
+    return {
+        "status": "queued",
+        "provider": provider,
+        "message": f"{provider['label']} connector credentials detected. Queue integration work item next.",
+        "package": package,
+    }
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
+    providers = ai_provider_status()
     return {
         "status": "ok",
         "service": "CAD geometry server",
-        "aiProxy": bool(os.environ.get("OPENAI_API_KEY")),
-        "capabilities": ["geometry", "stl", "ai-proxy", "lca-screen", "patent-search"],
+        "aiProxy": any(providers.values()),
+        "aiProviders": providers,
+        "cadProviders": list(CAD_PROVIDERS.keys()),
+        "capabilities": ["geometry", "stl", "ai-proxy", "cad-broker", "lca-screen", "patent-search"],
     }
 
 
 @app.post("/api/copilot")
 async def copilot(body: dict):
     """Server-side AI proxy so GitHub Pages does not need browser-stored shared keys."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return {
-            "error": "OPENAI_API_KEY is not configured on this server.",
-            "reply": "AI proxy is reachable, but no server-side OpenAI key is configured.",
-        }
+    return await asyncio.to_thread(run_ai_proxy, body)
 
-    return await asyncio.to_thread(call_openai_copilot, body, api_key)
+
+@app.post("/api/ai/generate")
+async def ai_generate(body: dict):
+    """Provider-neutral AI proxy. Configure AI_PROVIDER and provider keys on the server."""
+    return await asyncio.to_thread(run_ai_proxy, body)
+
+
+@app.get("/api/cad/providers")
+async def cad_providers():
+    return {
+        "providers": [
+            {"key": key, **value}
+            for key, value in CAD_PROVIDERS.items()
+        ],
+        "message": "CAD provider registry loaded. Cloud/desktop providers need their own credentials or host bridges.",
+    }
+
+
+@app.post("/api/cad/package")
+async def cad_package(body: dict):
+    provider_key = body.get("provider") or body.get("providerKey") or "open_geometry"
+    payload = body.get("payload") or body
+    package = provider_package(payload, provider_key)
+    return {
+        "status": "packaged",
+        "message": f"CAD-neutral package generated for {package['provider']['label']}.",
+        "package": package,
+    }
+
+
+@app.post("/api/cad/push")
+async def cad_push(body: dict):
+    provider_key = body.get("provider") or body.get("providerKey") or "open_geometry"
+    payload = body.get("payload") or body
+    return push_provider_package(payload, provider_key)
 
 
 @app.post("/api/lca")

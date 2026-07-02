@@ -29,6 +29,67 @@ const mimeTypes = {
   ".svg": "image/svg+xml; charset=utf-8"
 };
 
+const cadProviders = {
+  solidworks_desktop: {
+    label: "SOLIDWORKS desktop",
+    category: "desktop",
+    status: "requires-host",
+    viewer: "Bridge iframe or exported macro",
+    auth: "Windows host with licensed SOLIDWORKS and COM automation",
+    outputs: ["SWB macro", "design-table CSV", "STEP/STL via host"],
+    nextSteps: [
+      "Run the Windows SolidWorks bridge on a licensed workstation or VM.",
+      "POST the neutral CAD package to /api/model on that bridge.",
+      "Use the generated macro/design table when direct COM access is unavailable."
+    ]
+  },
+  solidworks_cloud: {
+    label: "3DEXPERIENCE / SOLIDWORKS xDesign",
+    category: "cloud",
+    status: "broker-required",
+    viewer: "Provider workspace or shared model iframe when allowed",
+    auth: "3DEXPERIENCE OAuth/session broker",
+    outputs: ["neutral CAD package", "STEP/STL handoff", "xDesign workspace link"],
+    nextSteps: ["Create a Dassault cloud broker with user login.", "Fallback to STEP/STL import when feature-level APIs are unavailable."]
+  },
+  onshape: {
+    label: "Onshape",
+    category: "cloud",
+    status: "api-ready",
+    viewer: "Onshape document/Part Studio iframe or shared URL",
+    auth: "Onshape OAuth or API key/secret",
+    outputs: ["Part Studio feature JSON", "STEP", "STL", "DXF"],
+    nextSteps: ["Provision Onshape OAuth/API credentials.", "Push feature/parameter updates through the Onshape REST API."]
+  },
+  autodesk_fusion: {
+    label: "Autodesk Fusion / APS",
+    category: "cloud",
+    status: "api-ready",
+    viewer: "Autodesk Platform Services Viewer",
+    auth: "Autodesk Platform Services OAuth",
+    outputs: ["SVF/Viewer URN", "STEP", "STL", "Fusion automation job"],
+    nextSteps: ["Provision APS credentials and storage.", "Translate with Model Derivative and automate with Design Automation."]
+  },
+  autocad: {
+    label: "AutoCAD / DWG",
+    category: "cloud",
+    status: "api-ready",
+    viewer: "Autodesk Platform Services Viewer",
+    auth: "Autodesk Platform Services OAuth",
+    outputs: ["DWG/DXF package", "Design Automation work item", "Viewer URN"],
+    nextSteps: ["Convert profiles into DXF/DWG entities.", "Run AutoCAD Design Automation work items for scripted drawings."]
+  },
+  open_geometry: {
+    label: "Open geometry server",
+    category: "server",
+    status: "available",
+    viewer: "Three.js/STL",
+    auth: "none",
+    outputs: ["STL", "neutral parameter JSON", "analysis package"],
+    nextSteps: ["Use local preview/export immediately.", "Add STEP/BREP-quality output later with CadQuery/OpenCascade."]
+  }
+};
+
 let lastRun = {
   activeDocument: "portable-diagnostic-enclosure.SLDPRT",
   message: "Mac development bridge is ready",
@@ -60,6 +121,13 @@ const server = createServer(async (request, response) => {
         solidworksRunning: false,
         activeDocument: lastRun.activeDocument,
         embedUrl: absoluteUrl(request, "/viewer"),
+        aiProxy: Boolean(process.env.OPENAI_API_KEY),
+        aiProviders: {
+          openai: Boolean(process.env.OPENAI_API_KEY),
+          gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
+          claude: Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY)
+        },
+        cadProviders: Object.keys(cadProviders),
         message: "Mac dev bridge online. Native SolidWorks embedding still requires the Windows host."
       }, 200, method === "HEAD");
       return;
@@ -152,6 +220,50 @@ const server = createServer(async (request, response) => {
       const requestBody = await readJson(request);
       const copilot = await runCopilot(requestBody);
       json(response, copilot);
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/api/ai/generate") {
+      const requestBody = await readJson(request);
+      const copilot = await runCopilot(requestBody);
+      json(response, copilot);
+      return;
+    }
+
+    if ((method === "GET" || method === "HEAD") && url.pathname === "/api/cad/providers") {
+      json(response, {
+        providers: Object.entries(cadProviders).map(([key, value]) => ({ key, ...value })),
+        message: "Mac bridge CAD provider registry loaded."
+      }, 200, method === "HEAD");
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/api/cad/package") {
+      const requestBody = await readJson(request);
+      const providerKey = requestBody.provider || requestBody.providerKey || "open_geometry";
+      const payload = requestBody.payload || requestBody;
+      const packageBody = cadPackage(payload, providerKey);
+      json(response, {
+        status: "packaged",
+        message: `CAD-neutral package generated for ${packageBody.provider.label}.`,
+        package: packageBody
+      });
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/api/cad/push") {
+      const requestBody = await readJson(request);
+      const providerKey = requestBody.provider || requestBody.providerKey || "open_geometry";
+      const payload = requestBody.payload || requestBody;
+      const packageBody = cadPackage(payload, providerKey);
+      json(response, {
+        status: providerKey === "open_geometry" ? "ready" : "needs-credentials",
+        provider: packageBody.provider,
+        message: providerKey === "open_geometry"
+          ? "Open geometry package is ready for local preview/export."
+          : `${packageBody.provider.label} package created; real push needs credentials or a host bridge.`,
+        package: packageBody
+      });
       return;
     }
 
@@ -345,6 +457,38 @@ function buildSolidWorksOperations(payload) {
     dimensionOperations: dimensionOps,
     imageGeometryOperations: contourOps,
     transitionMatrix: payload.imageGeometry?.transitionMatrix || []
+  };
+}
+
+function cadPackage(payload, providerKey = "open_geometry") {
+  const provider = cadProviders[providerKey] || cadProviders.open_geometry;
+  const concept = payload.concept || {};
+  const title = concept.title || payload.title || "CAD concept";
+  const rows = parameters(payload).map((parameter, index) => ({
+    configuration: "Default",
+    parameter: parameter.key || `p${index + 1}`,
+    label: parameter.label || parameter.key || `Parameter ${index + 1}`,
+    value: parameter.value,
+    unit: parameter.unit || "mm",
+    cadDimension: parameter.swDimension || `D${index + 1}@${String(parameter.key || `p${index + 1}`).toUpperCase()}`,
+    source: parameter.source || "CAD package"
+  }));
+  return {
+    version: "cad-neutral-v1",
+    createdAt: new Date().toISOString(),
+    providerKey,
+    provider,
+    target: {
+      family: concept.family || payload.family || "assembly",
+      title,
+      documentName: payload.targetDocument || `${slug(title)}.SLDPRT`,
+      material: concept.material || payload.material || "Mixed materials"
+    },
+    payload,
+    designTable: rows,
+    operations: buildSolidWorksOperations(payload),
+    exportFormats: provider.outputs,
+    nextSteps: provider.nextSteps
   };
 }
 

@@ -3,13 +3,13 @@
 **Repo:** https://github.com/kabirspatel/solidworks-ai-cad-studio  
 **Live URL:** https://kabirspatel.github.io/solidworks-ai-cad-studio/  
 **Local path:** `/Users/kabirpatel/Documents/Playground/solidworks-ai-cad-studio`  
-**Latest pushed version:** v=18 (use `git log -1 --oneline` for the current hash)
+**Latest pushed version:** v=19 (use `git log -1 --oneline` for the current hash)
 
 ---
 
 ## What this app is
 
-A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user describes a part (or picks from 25 seed bottle variants), adjusts sliders, AI generates parameters, and the result pushes to local SolidWorks via a VBA macro or is previewed live in a Three.js 3D viewer.
+A static GitHub Pages dashboard for AI-assisted parametric CAD design. The user describes a part (or picks from 25 seed bottle variants), adjusts sliders, AI generates parameters, and the result routes through a CAD-neutral package to SolidWorks, Onshape, Autodesk/Fusion, AutoCAD, or the open geometry preview/export path.
 
 **Stack:** Pure static HTML/CSS/JS — no build step, no Node at runtime.  
 **Deploy:** `git add . && git commit && git push origin main` → GitHub Pages auto-builds.
@@ -51,7 +51,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 # open http://127.0.0.1:5174
 ```
 
-After any JS/CSS change: bump `?v=N` in `index.html` (currently v=18) to force GitHub Pages cache bust.
+After any JS/CSS change: bump `?v=N` in `index.html` (currently v=19) to force GitHub Pages cache bust.
 
 ---
 
@@ -69,15 +69,22 @@ After any JS/CSS change: bump `?v=N` in `index.html` (currently v=18) to force G
 
 ## What WORKS (confirmed)
 
-### AI Copilot — all three modes correct
+### AI Copilot
 | Provider | Endpoint | Key storage | Notes |
 |----------|----------|-------------|-------|
+| **Server proxy** | `/api/ai/generate` or `/api/copilot` | backend env vars | New preferred production route; supports OpenAI, Gemini, Claude, or local fallback |
 | **Gemini** | `generativelanguage.googleapis.com/v1beta/interactions`, default model `gemini-3.5-flash`, fallback to `generateContent` | `sessionStorage` SESSION_GEMINI_KEY | Browser key route now has real diagnostic via Check AI route |
 | **Claude** | `api.anthropic.com/v1/messages`, model `claude-sonnet-4-6`, header `anthropic-dangerous-direct-browser-access: true` | `sessionStorage` SESSION_CLAUDE_KEY | Working |
 | **OpenAI** | `api.openai.com/v1/chat/completions`, default model `gpt-4o-mini` | `sessionStorage` SESSION_AI_KEY | Working (was broken, fixed this session) |
 | **Local parser** | No network call | — | Always available, returns deterministic output |
 
 AI flow: prompt → `askCopilot()` → `callGemini/Claude/OpenAI()` → `parseJsonFromText()` → `applyAiPayload()` → `updateFromBlueprint()` → `persist()` → `render()`
+
+### CAD broker foundation
+- `cad-server/main.py` now exposes `/api/cad/providers`, `/api/cad/package`, and `/api/cad/push`.
+- Provider registry includes `solidworks_desktop`, `solidworks_cloud`, `onshape`, `autodesk_fusion`, `autocad`, and `open_geometry`.
+- Dashboard CAD panel has a target CAD platform selector plus "Push to selected CAD" and "Export CAD package" actions.
+- `bridge/MacDevBridge/server.mjs` mirrors the same provider and AI routes for local testing.
 
 ### Bottle parametric design
 - 25 seed variants B01–B25, each with full parameter set + morph family
@@ -207,6 +214,10 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 - **Gemini route modernized**: Browser Gemini now defaults to `gemini-3.5-flash`, uses the Interactions API with structured JSON output, falls back to `generateContent`, and the Check AI route button makes a real diagnostic call.
 - **Prompt hard constraints added**: Bottle prompts such as "wide", "smooth", "no spiral", and "without helix" now override stale seed/AI parameters by setting helix/rib/ring/facet dimensions appropriately.
 - **Cache bust bumped again**: `index.html` now loads `app.js?v=18`.
+- **CAD-neutral broker started**: Backend and Mac bridge expose provider registry, package, and push endpoints for SolidWorks, Onshape, Autodesk/Fusion, AutoCAD, and open geometry.
+- **Server AI proxy expanded**: Backend now exposes `/api/ai/generate`, dispatches OpenAI/Gemini/Claude by env/model, and returns local fallback JSON when no provider key is configured.
+- **Dashboard target CAD selector added**: CAD panel can export/push provider-specific neutral packages and switch AI to the server proxy.
+- **Cache bust bumped again**: `index.html` now loads `app.js?v=19`.
 
 ---
 
@@ -214,11 +225,11 @@ Implements: `/health`, `/api/simulate`, `/api/optimize`, `/api/material-assessme
 
 ### HIGH PRIORITY
 
-**1. Production AI route**
-Browser keys work for prototyping, but each user currently needs their own Gemini/Claude/OpenAI key and browser calls expose provider keys to that tab. Options:
-- Add a server-side AI proxy endpoint (backend holds the key, browser calls `/api/copilot`) — no per-user key needed
-- Keep browser-key mode for personal prototyping only
-- The `callAiEndpoint()` function already supports a custom bridge endpoint — just needs a deployed backend
+**1. Deploy backend server and configure provider keys**
+Browser keys work for prototyping, but the production route is now server-side:
+- Deploy `cad-server` and set one or more env vars: `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `ANTHROPIC_API_KEY`.
+- In the dashboard, paste the backend URL into Geometry server URL, click Check CAD server, then Use CAD server AI.
+- Keep browser-key mode for personal prototyping only.
 
 **2. Deploy cad-server to Render.com**
 ```sh
@@ -231,6 +242,12 @@ Browser keys work for prototyping, but each user currently needs their own Gemin
 Go to render.com → New Web Service → connect `kabirspatel/solidworks-ai-cad-studio` → deploy.  
 After deploy, copy the URL (e.g. `https://solidworks-cad-server.onrender.com`) → paste into dashboard "Geometry server" field → save → 3D viewer will fetch real STL.  
 Note: free tier sleeps after 15 min, first request takes ~30s to wake.
+
+**3. Implement real provider connectors**
+- SolidWorks desktop: finish Windows bridge/COM host.
+- Onshape: OAuth/API key connector for documents, Part Studios, features, and export.
+- Autodesk/Fusion/AutoCAD: APS OAuth, Object Storage, Model Derivative, Viewer, and Design Automation jobs.
+- Open geometry: add CadQuery/OpenCascade for STEP/BREP output.
 
 ### MEDIUM PRIORITY
 

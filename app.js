@@ -389,16 +389,49 @@ const AGENT_LANES = [
 const AI_ROUTE_LIBRARY = [
   ["Fastest prototype", "Local parser", "Always works, but only extracts deterministic parameters from the prompt."],
   ["Working AI today", "Browser key", "User enters Gemini, Claude, or OpenAI key for this tab. Good for demos, not shared production."],
-  ["Production route", "Server proxy", "Dashboard calls /api/copilot on a backend; backend stores the AI key and returns model JSON."],
-  ["Native future", "SOLIDWORKS AI", "Use SOLIDWORKS Design AI companions when available in the licensed CAD environment."]
+  ["Production route", "Server proxy", "Dashboard calls /api/ai/generate or /api/copilot; backend stores provider keys and returns model JSON."],
+  ["CAD-native future", "Provider agents", "Route the same intent to SolidWorks, Onshape, Autodesk/Fusion, AutoCAD, or open geometry adapters."]
 ];
 
 const CAD_PORTAL_LANES = [
-  ["Display", "Three.js preview, bridge iframe, or pasted cloud CAD viewer URL."],
-  ["Import", "SolidWorks macro download or bridge POST to /api/model."],
-  ["Export", "SolidWorks macro, design-table CSV, JSON payload, and STL when a CAD server is configured."],
-  ["Automate", "Windows SolidWorks host must run COM automation for true live model edits."]
+  ["Display", "Three.js preview, bridge iframe, cloud CAD viewer URL, or APS/Onshape viewer."],
+  ["Import", "CAD-neutral package routes to SolidWorks, Onshape, Autodesk/Fusion, AutoCAD, or open geometry."],
+  ["Export", "Macro, design-table CSV, CAD package JSON, STL, and provider-specific handoff payloads."],
+  ["Automate", "Commercial CAD edits require a provider API broker or licensed desktop host."]
 ];
+
+const CAD_PROVIDER_LIBRARY = {
+  solidworks_desktop: {
+    label: "SOLIDWORKS desktop",
+    note: "Requires Windows host with licensed SOLIDWORKS COM automation.",
+    packageName: "solidworks-desktop"
+  },
+  solidworks_cloud: {
+    label: "3DEXPERIENCE / xDesign",
+    note: "Requires Dassault cloud broker or manual import flow.",
+    packageName: "solidworks-cloud"
+  },
+  onshape: {
+    label: "Onshape",
+    note: "Best near-term web CAD target; requires OAuth/API credentials.",
+    packageName: "onshape"
+  },
+  autodesk_fusion: {
+    label: "Autodesk Fusion / APS",
+    note: "Uses Autodesk Platform Services for viewer/translation/automation.",
+    packageName: "autodesk-fusion"
+  },
+  autocad: {
+    label: "AutoCAD / DWG",
+    note: "Uses APS Design Automation and DWG/DXF package output.",
+    packageName: "autocad"
+  },
+  open_geometry: {
+    label: "Open geometry server",
+    note: "Immediate STL/Three.js path with no commercial CAD account.",
+    packageName: "open-geometry"
+  }
+};
 
 const LCA_TOOL_LINKS = [
   {
@@ -661,7 +694,11 @@ function createDefaultState() {
     },
     cadServer: {
       url: "",
-      status: "Not configured"
+      status: "Not configured",
+      provider: "solidworks_desktop",
+      providers: [],
+      lastPackage: null,
+      lastMessage: "Select a CAD platform and connect a server/bridge when ready."
     }
   };
 }
@@ -712,7 +749,11 @@ function normalizeState(saved) {
       ...(saved.ip || {}),
       results: Array.isArray(saved.ip?.results) ? saved.ip.results : defaults.ip.results
     },
-    cadServer: { ...defaults.cadServer, ...(saved.cadServer || {}) },
+    cadServer: {
+      ...defaults.cadServer,
+      ...(saved.cadServer || {}),
+      providers: Array.isArray(saved.cadServer?.providers) ? saved.cadServer.providers : defaults.cadServer.providers
+    },
     _bottleMorph: saved._bottleMorph || null
   };
 }
@@ -1580,6 +1621,7 @@ function syncDraftFromDom() {
   const bridgeUrl = document.getElementById("bridgeUrl");
   const cloudBrokerUrl = document.getElementById("cloudBrokerUrl");
   const cloudSpaceUrl = document.getElementById("cloudSpaceUrl");
+  const cadProvider = document.getElementById("cadProvider");
 
   if (prompt) state.prompt = prompt.value.trim();
   if (requirements) state.requirementText = requirements.value.trim();
@@ -1608,6 +1650,7 @@ function syncDraftFromDom() {
   if (geminiKey && geminiKey.value.trim()) sessionStorage.setItem(SESSION_GEMINI_KEY, geminiKey.value.trim());
   const cadServerUrl = document.getElementById("cadServerUrl");
   if (cadServerUrl) state.cadServer.url = cadServerUrl.value.trim();
+  if (cadProvider) state.cadServer.provider = cadProvider.value;
   if (bridgeUrl) state.bridge.url = bridgeUrl.value.trim();
   if (cloudBrokerUrl) state.cloud.brokerUrl = cloudBrokerUrl.value.trim();
   if (cloudSpaceUrl) {
@@ -1628,6 +1671,22 @@ function sourceBadge(source) {
   return source === "Requirement" ? "good" : source === "AI" ? "warn" : "";
 }
 
+function cadProviderMeta(key = state.cadServer?.provider) {
+  const backend = (state.cadServer?.providers || []).find(provider => provider.key === key);
+  return backend || CAD_PROVIDER_LIBRARY[key] || CAD_PROVIDER_LIBRARY.solidworks_desktop;
+}
+
+function cadProviderLabel(key = state.cadServer?.provider) {
+  return cadProviderMeta(key).label || key || "CAD platform";
+}
+
+function cadPackagePayload() {
+  return {
+    provider: state.cadServer?.provider || "solidworks_desktop",
+    payload: makeCurrentModelPayload()
+  };
+}
+
 function makeCurrentModelPayload() {
   return {
     revision: state.revision,
@@ -1642,6 +1701,12 @@ function makeCurrentModelPayload() {
     analysis: state.analysis,
     agents: state.agents,
     cloud: state.cloud,
+    cad: {
+      provider: state.cadServer?.provider || "solidworks_desktop",
+      providerLabel: cadProviderLabel(state.cadServer?.provider),
+      serverUrl: state.cadServer?.url || "",
+      status: state.cadServer?.status || ""
+    },
     solidworksIntent: state.solidworksIntent,
     targetDocument: state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`,
     standards: {
@@ -2286,6 +2351,23 @@ function useBridgeAiProxy() {
   persist("Bridge AI proxy selected");
 }
 
+function useCadServerAiProxy() {
+  syncDraftFromDom();
+  const baseUrl = cadServerBaseUrl() || (state.bridge.url ? normalizeBaseUrl(state.bridge.url) : "");
+  if (!baseUrl) {
+    state.ai.status = "Proxy not configured";
+    state.ai.lastReply = "Add a CAD server URL or local bridge URL first, then use the server AI proxy.";
+    persist("Add CAD server URL");
+    return;
+  }
+  state.ai.mode = "bridge";
+  state.ai.endpoint = `${baseUrl}/api/ai/generate`;
+  state.ai.model = state.ai.model && !["parser", DEFAULT_MODEL].includes(state.ai.model) ? state.ai.model : "";
+  state.ai.status = "Server proxy selected";
+  state.ai.lastReply = `Using server-side AI proxy at ${state.ai.endpoint}. Configure OPENAI_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY on that server for generative output.`;
+  persist("CAD server AI proxy selected");
+}
+
 function normalizeBaseUrl(value) {
   return value.replace(/\/+$/, "");
 }
@@ -2536,7 +2618,16 @@ async function checkCadServer() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || data.message || `CAD server failed (${response.status})`);
     state.cadServer.status = data.aiProxy ? "Online + AI proxy" : "Online";
-    state.bridge.lastMessage = `${data.service || "CAD server"} is reachable. AI proxy: ${data.aiProxy ? "configured" : "not configured"}.`;
+    state.cadServer.providers = (data.cadProviders || []).map(key => ({ key, ...(CAD_PROVIDER_LIBRARY[key] || {}) }));
+    try {
+      const providerResponse = await fetch(`${baseUrl}/api/cad/providers`);
+      const providerData = await providerResponse.json().catch(() => ({}));
+      if (providerResponse.ok && Array.isArray(providerData.providers)) state.cadServer.providers = providerData.providers;
+    } catch {
+      // Health already tells us the server is reachable; provider detail can wait.
+    }
+    state.cadServer.lastMessage = `${data.service || "CAD server"} reachable. AI proxy: ${data.aiProxy ? "configured" : "not configured"}. CAD providers: ${(data.cadProviders || []).length || state.cadServer.providers.length}.`;
+    state.bridge.lastMessage = state.cadServer.lastMessage;
     persist("CAD server connected");
   } catch (error) {
     state.cadServer.status = `Error: ${error.message}`;
@@ -2611,6 +2702,89 @@ function cloudPackage() {
       transitionMatrix: payload.imageGeometry?.transitionMatrix || []
     }
   };
+}
+
+function localCadPackage() {
+  const payload = makeCurrentModelPayload();
+  const key = state.cadServer?.provider || "solidworks_desktop";
+  const provider = cadProviderMeta(key);
+  const rows = payload.parameters.map((parameter, index) => ({
+    configuration: "Default",
+    parameter: parameter.key,
+    label: parameter.label,
+    value: parameter.value,
+    unit: parameter.unit,
+    cadDimension: parameter.swDimension || toSolidWorksDimensionName(parameter, index),
+    source: parameter.source
+  }));
+  return {
+    version: "cad-neutral-v1",
+    createdAt: new Date().toISOString(),
+    providerKey: key,
+    provider,
+    target: {
+      family: payload.concept?.family || "assembly",
+      title: payload.concept?.title || "CAD concept",
+      documentName: payload.targetDocument,
+      material: payload.concept?.material || "Mixed materials"
+    },
+    payload,
+    designTable: rows,
+    operations: cloudPackage().operations,
+    exportFormats: provider.outputs || ["neutral JSON", "STL"],
+    nextSteps: provider.nextSteps || [provider.note || "Configure the provider broker to automate push."]
+  };
+}
+
+async function exportCadPackage() {
+  syncDraftFromDom();
+  let packageBody = localCadPackage();
+  if (cadServerBaseUrl()) {
+    try {
+      const data = await postCadServer("/api/cad/package", cadPackagePayload(), "CAD package");
+      packageBody = data.package || packageBody;
+      state.cadServer.lastPackage = packageBody;
+      state.cadServer.lastMessage = data.message || "CAD package generated by server.";
+    } catch (error) {
+      state.cadServer.lastMessage = `Server package failed, exported local package instead: ${error.message}`;
+    }
+  }
+  const fileLabel = cadProviderMeta(packageBody.providerKey).packageName || packageBody.providerKey || "cad";
+  downloadText(`${sanitizeFilename(state.concept.title || "cad-model")}-${fileLabel}-package.json`, JSON.stringify(packageBody, null, 2), "application/json");
+  persist("CAD package exported");
+}
+
+async function pushToCadProvider() {
+  syncDraftFromDom();
+  const providerKey = state.cadServer?.provider || "solidworks_desktop";
+  if (providerKey === "solidworks_desktop" && state.bridge.url) {
+    await sendToSolidWorks();
+    return;
+  }
+  if (!cadServerBaseUrl()) {
+    exportCadPackage();
+    state.cadServer.status = "Package exported";
+    state.cadServer.lastMessage = "No CAD server configured, so a neutral package was downloaded for manual import.";
+    persist("CAD package exported");
+    return;
+  }
+  loadingAction = "push-cad";
+  render();
+  try {
+    const data = await postCadServer("/api/cad/push", cadPackagePayload(), "CAD push");
+    state.cadServer.status = data.status || "Packaged";
+    state.cadServer.lastPackage = data.package || null;
+    state.cadServer.lastMessage = data.message || `${cadProviderLabel(providerKey)} package sent to CAD broker.`;
+    if (data.package?.provider?.viewer) state.cloud.lastMessage = data.package.provider.viewer;
+    persist("CAD provider updated");
+  } catch (error) {
+    state.cadServer.status = "CAD push failed";
+    state.cadServer.lastMessage = error.message;
+    persist("CAD push failed");
+  } finally {
+    loadingAction = "";
+    render();
+  }
 }
 
 function openCloudWorkspace() {
@@ -3062,6 +3236,7 @@ function renderCopilot() {
           </div>
           <div class="button-row">
             <button class="button secondary" data-action="use-bridge-ai">Use bridge AI proxy</button>
+            <button class="button secondary" data-action="use-cad-server-ai">Use CAD server AI</button>
             <button class="button ghost" data-action="test-ai" ${loadingAction === "test-ai" ? "disabled" : ""}>${loadingAction === "test-ai" ? "Checking..." : "Check AI route"}</button>
           </div>
         </details>
@@ -3805,13 +3980,19 @@ function renderModel() {
   const showCloud = state.cloud.displayMode === "cloud" && cloudViewer;
   const showBridge = !showCloud && state.bridge.embedUrl;
   const bridgeOk = state.bridge.status === "Connected" || state.bridge.status === "Synced" || state.bridge.status === "Bridge online";
+  const providerKey = state.cadServer?.provider || "solidworks_desktop";
+  const provider = cadProviderMeta(providerKey);
   const docName = state.bridge.activeDocument || `${sanitizeFilename(state.concept.title)}.SLDPRT`;
+  const providerOptions = Object.entries(CAD_PROVIDER_LIBRARY).map(([key, item]) => {
+    const serverProvider = (state.cadServer?.providers || []).find(p => p.key === key);
+    return `<option value="${key}" ${providerKey === key ? "selected" : ""}>${escapeHtml(serverProvider?.label || item.label)}</option>`;
+  }).join("");
 
   document.getElementById("modelPanel").innerHTML = `
     <div class="panel-header">
       <div>
-        <span class="eyebrow">CAD / SolidWorks</span>
-        <h2>${escapeHtml(docName)}</h2>
+        <span class="eyebrow">CAD / multi-platform</span>
+        <h2>${escapeHtml(cadProviderLabel(providerKey))}</h2>
       </div>
       <span class="badge ${showCloud || showBridge ? "" : bridgeOk ? "" : "warn"}">${showCloud ? "cloud" : showBridge ? "bridge" : "3D preview"}</span>
     </div>
@@ -3843,7 +4024,8 @@ function renderModel() {
       </div>
 
       <div class="button-row cad-action-row">
-        <button class="button primary" data-action="send-model" ${loadingAction === "send-model" ? "disabled" : ""}>Import / push to SolidWorks</button>
+        <button class="button primary" data-action="push-cad" ${loadingAction === "push-cad" || loadingAction === "send-model" ? "disabled" : ""}>${loadingAction === "push-cad" ? "Packaging..." : "Push to selected CAD"}</button>
+        <button class="button secondary" data-action="export-cad-package">Export CAD package</button>
         <button class="button secondary" data-action="download-sw-vars">Export SolidWorks macro</button>
         <button class="button secondary" data-action="export-design-table">Export design table</button>
         <button class="button secondary" data-action="download-stl" ${loadingAction === "download-stl" ? "disabled" : ""}>Export STL</button>
@@ -3852,8 +4034,13 @@ function renderModel() {
       </div>
 
       <details class="settings-details">
-        <summary>SolidWorks connection and CAD server settings</summary>
+        <summary>CAD platform, connection, and server settings</summary>
         <div class="settings-grid">
+          <div>
+            <label for="cadProvider">Target CAD platform</label>
+            <select id="cadProvider">${providerOptions}</select>
+            <p class="helper-text">${escapeHtml(provider.note || provider.auth || "Select where the CAD-neutral package should route.")}</p>
+          </div>
           <div class="field-row">
             <div>
               <label for="bridgeUrl">SolidWorks bridge URL</label>
@@ -3869,9 +4056,10 @@ function renderModel() {
           <div class="button-row">
             <button class="button secondary" data-action="connect-bridge" ${loadingAction === "connect-bridge" ? "disabled" : ""}>${loadingAction === "connect-bridge" ? "Connecting..." : bridgeOk ? "Bridge connected" : "Connect bridge"}</button>
             <button class="button secondary" data-action="check-cad-server" ${loadingAction === "check-cad-server" ? "disabled" : ""}>${loadingAction === "check-cad-server" ? "Checking..." : "Check CAD server"}</button>
+            <button class="button secondary" data-action="use-cad-server-ai">Use CAD server AI</button>
             <button class="button ghost" data-action="export-snapshot">Export payload</button>
           </div>
-          ${state.bridge.lastMessage ? `<p class="bridge-msg">${escapeHtml(state.bridge.lastMessage)}</p>` : ""}
+          ${state.cadServer.lastMessage || state.bridge.lastMessage ? `<p class="bridge-msg">${escapeHtml(state.cadServer.lastMessage || state.bridge.lastMessage)}</p>` : ""}
           <div class="field-row">
             <div>
               <label for="cloudSpaceUrl">Cloud CAD embed URL</label>
@@ -3884,6 +4072,7 @@ function renderModel() {
           </div>
           <div class="bridge-strip">
             <div class="bridge-card"><span>Bridge</span><strong>${escapeHtml(state.bridge.status)}</strong></div>
+            <div class="bridge-card"><span>CAD target</span><strong>${escapeHtml(cadProviderLabel(providerKey))}</strong></div>
             <div class="bridge-card"><span>Last push</span><strong>${escapeHtml(formatDate(state.bridge.lastSync))}</strong></div>
             <div class="bridge-card"><span>Revision</span><strong>R${String(state.revision).padStart(2, "0")}</strong></div>
           </div>
@@ -4409,11 +4598,14 @@ document.addEventListener("click", event => {
   if (action === "ask-ai") askCopilot();
   if (action === "test-ai") testAiRoute();
   if (action === "use-bridge-ai") useBridgeAiProxy();
+  if (action === "use-cad-server-ai") useCadServerAiProxy();
   if (action === "generate-model") generateModel();
   if (action === "apply-parameters") applyParameterChanges();
   if (action === "connect-bridge") connectBridge();
   if (action === "check-cad-server") checkCadServer();
   if (action === "send-model") sendToSolidWorks();
+  if (action === "push-cad") pushToCadProvider();
+  if (action === "export-cad-package") exportCadPackage();
   if (action === "download-stl") downloadStl();
   if (action === "open-bridge-viewer") openBridgeViewer();
   if (action === "open-cloud") openCloudWorkspace();
@@ -4556,7 +4748,7 @@ document.addEventListener("change", event => {
     }
     persist();
   }
-  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl", "cadServerUrl"].includes(event.target.id)) {
+  if (["aiMode", "aiModel", "aiEndpoint", "templateSelect", "bridgeUrl", "cloudBrokerUrl", "cloudSpaceUrl", "cadServerUrl", "cadProvider"].includes(event.target.id)) {
     syncDraftFromDom();
     persist();
   }
